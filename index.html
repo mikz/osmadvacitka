@@ -48,6 +48,7 @@
   #map.full .fsbtn { margin-top: calc(10px + env(safe-area-inset-top)); }
   .lbl { position: absolute; white-space: nowrap; font: 600 12px/1.3 system-ui, sans-serif; background: #fffe; color: #000; padding: 1px 6px; border-radius: 8px; box-shadow: 0 1px 3px #0005; pointer-events: none; }
   .lbl.name { transform: translate(-50%, 4px); } .lbl.hop { transform: translate(-50%, -50%); font-weight: 500; background: #ffe9a8; }
+  #map.far .lbl.name { display: none; }
   .lbl .mi { color: #000; font-size: 15px; }
   .ride { padding-left: 26px; }
   .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
@@ -186,8 +187,9 @@ function view(name) {
   fsBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '⛶ Full screen', onclick: () => fullscreen() });
   map.controls[google.maps.ControlPosition.TOP_RIGHT].push(fsBtn);
   addEventListener('keydown', e => e.key === 'Escape' && fullscreen(false));
+  map.addListener('zoom_changed', () => $('map').classList.toggle('far', map.getZoom() < 15));   // pub names only when zoomed in
   const geoMsg = e => e.code === 1
-    ? 'Location is blocked. On iPhone: Settings → Privacy & Security → Location Services → Safari Websites → While Using the App, then reopen the app.'
+    ? 'This browser is not sharing your location, so the map cannot show where you are. On iPhone: Settings → Privacy & Security → Location Services → Safari Websites → While Using the App, then reopen the app.'
     : 'Could not get your position yet.';
   const locBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '◎ Me', onclick: () =>
     navigator.geolocation.getCurrentPosition(p => { setMe(p); map.panTo(mePos); map.setZoom(Math.max(map.getZoom(), 16)); }, e => alert(geoMsg(e)), { enableHighAccuracy: true, timeout: 10000 }) });
@@ -213,7 +215,7 @@ function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is mi
   on = $('map').classList.toggle('full', on);
   map.setOptions({ gestureHandling: on ? 'greedy' : 'cooperative' });   // one finger pans in full screen; embedded keeps page scrolling
   fsBtn.textContent = on ? '✕ Exit full screen' : '⛶ Full screen';
-  setTimeout(() => lastBounds && map.fitBounds(lastBounds, 40), 150);
+  setTimeout(() => { google.maps.event.trigger(map, 'resize'); lastBounds && map.fitBounds(lastBounds, 40); }, 150);
 }
 let fsBtn;
 function draw(points, labels, lines) {   // pins + lines on the shared map
