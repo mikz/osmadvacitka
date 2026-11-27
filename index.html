@@ -270,7 +270,7 @@ function renderPlan() {
   }
   $('hops').innerHTML = html;
   const pubMin = (+$('pubMin').value || 0) * 60 * (seq.length - 2);
-  $('summaryP').textContent = `${mins(total)} travelling · finish about ${hhmm(Date.now() + (total + pubMin) * 1000)}`;
+  $('summaryP').textContent = `${mins(total)} travel · finish ${hhmm(Date.now() + (total + pubMin) * 1000)}`;
   $('table').innerHTML = `<table><tr><th></th>${plan.to.map(b => `<th>${b.id}</th>`).join('')}</tr>${plan.from.map(a =>
     `<tr><th>${a.id === 'me' ? '•' : a.id}</th>${plan.to.map(b => a.id === b.id ? '<td></td>'
       : `<td class="${plan.w[a.id][b.id].s <= tcost(a.id, b.id) ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
@@ -365,7 +365,7 @@ async function run(origin) {
     }
     $('legs').innerHTML = html;
     tick();
-    $('summary').textContent = `${mins(travel)} travelling · finish at Petřín about ${hhmm(t)}`;
+    $('summary').textContent = `${mins(travel)} travel · finish ${hhmm(t)}`;
     const ov = draw([origin, ...stops], labels, lines);
     legOv = Object.fromEntries(stops.map((x, i) => [x.id, [ov.pins[i + 1], ov.lines[i]]]));
   } catch (e) {
