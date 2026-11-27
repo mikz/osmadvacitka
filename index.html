@@ -28,7 +28,7 @@
   button:disabled { opacity: .45; }
   #map { height: 45vh; margin: 0 -16px; }
   .sum { padding: 12px 0; font-weight: 600; }
-  .grip { font-style: normal; font-size: 24px; padding: 4px 10px 4px 0; cursor: grab; touch-action: none; user-select: none; }
+  .grip { font-style: normal; font-size: 24px; padding: 4px 0 4px 6px; cursor: grab; touch-action: none; user-select: none; }
   .sortable-ghost { opacity: .4; }
   .leg h3 button { padding: 4px 12px; }
   details { padding: 12px 0; } summary { cursor: pointer; padding: 8px 0; }
@@ -231,10 +231,9 @@ function renderPlan() {
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
-    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}<span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
-      <small>from ${esc(a.n)}</small>
+    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) · from ${esc(a.n)}</small></span>${mv}${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}</h3>
       <div><span class="${walk ? 'mode walk' : ''}">${WALK} ${mins(w.s)} · ${km(w.m)}</span></div>
-      <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)} min` : ''}` : 'no useful connection'}</span></div></div>`;
+      <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)} min` : ''}` : '—'}</span></div></div>`;
   }
   $('hops').innerHTML = html;
   const pubMin = (+$('pubMin').value || 0) * 60 * (seq.length - 2);
