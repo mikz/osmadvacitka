@@ -50,6 +50,7 @@
   .lbl.name { transform: translate(-50%, 4px); } .lbl.hop { transform: translate(-50%, -50%); font-weight: 500; background: #ffe9a8; }
   #map.far .lbl.name { display: none; }
   .iw { color: #000; font: 14px/1.5 system-ui, sans-serif; } .iw .mi { color: #000; }
+  .iw a { color: #1a73e8; font-weight: 600; }
   .lbl .mi { color: #000; font-size: 15px; }
   .ride { padding-left: 26px; }
   .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
@@ -122,7 +123,7 @@ const PUBS = [
   [10, 'Brouk', 'Vltavská 22', 'Radek nebo Plzeň', 50.0698476, 14.40688],
   [11, 'U Rudolfina', 'Křížovnická 10', 'Plzeň', 50.0880561, 14.4155471],
   [12, 'Techno Bar', 'Vratislavova 1', 'Páter 11 nebo Plzeň', 50.0672177, 14.4173677],
-  [13, 'U Libuše', 'Podskalská 7', 'Staráč 10 nebo Bráník 11', 50.06869, 14.4155556],
+  [13, 'U Libuše', 'Podskalská 7', 'Staráč 10 nebo Bráník 11', 50.0693488, 14.4154131],
   [14, 'U Suché Dásně', 'Trojická 11', 'Radek nebo Plzeň', 50.07081, 14.4163144],
   [15, 'Knoflík', 'Bozděchova 3', 'Staráč 10', 50.0702505, 14.4046856],
   [16, 'U Olmerů', 'Slavojova 16', 'Min 10', 50.0637582, 14.4253144],
@@ -132,7 +133,7 @@ const PUBS = [
   [20, 'U Žaludů', 'Na Zbořenci 5', 'Min 10', 50.0773088, 14.4171375],
 ].map(([id, n, a, b, lat, lng]) => ({ id, n, a, b, lat, lng }));
 const START = { id: 'S', n: 'Palackého náměstí', lat: 50.07297, lng: 14.41484 };
-const JAM = { id: 'X', n: 'Jamajka', a: 'Staropramenná 2', b: 'Min 10', lat: 50.0697855, lng: 14.4073846 };
+const JAM = { id: 'X', n: 'Jamajka', a: 'Staropramenná 23', b: 'Min 10', lat: 50.0713896, lng: 14.4068213 };
 const PET = { id: 'P', n: 'Petřín – rozhledna', a: 'lahváč', b: 'Min 10', lat: 50.083527, lng: 14.3950837 };
 const pub = id => PUBS.find(p => p.id == id);
 const $ = id => document.getElementById(id);
@@ -239,15 +240,23 @@ function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is mi
 let fsBtn;
 function draw(points, labels, lines, infos = []) {   // pins + lines on the shared map
   overlays.forEach(o => o.setMap(null)); overlays = [];
-  const bounds = new google.maps.LatLngBounds();
+  const bounds = new google.maps.LatLngBounds(), pinsAll = [];
   points.forEach((p, i) => {
     const m = new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n });
-    m.addListener('click', () => {   // tap a pin: which pub, what beer, how to get there
+    m.addListener('click', () => {   // tap a pin: which pub, what beer, how to get there, jump to the previous / next stop
       const el = html => Object.assign(document.createElement('div'), { className: 'iw', innerHTML: html });
+      const go = (j, arrow) => points[j] ? `<a href="#" data-go="${j}">${arrow} ${esc(points[j].n)}</a>` : '';
       info.setOptions({ headerContent: el(`<b>${esc(p.n)}</b>${typeof p.id === 'number' ? ` (${p.id})` : ''}`) });
-      info.setContent(el([p.a && `${esc(p.a)} · ${esc(p.b)}`, infos[i]].filter(Boolean).join('<br>')));
+      const body = el([p.a && `${esc(p.a)} · ${esc(p.b)}`, go(i - 1, '←'), infos[i], go(i + 1, '→')].filter(Boolean).join('<br>'));
+      body.onclick = e => {
+        const j = e.target.dataset.go;
+        if (j === undefined) return;
+        e.preventDefault(); map.panTo(ll(points[j])); google.maps.event.trigger(pinsAll[j], 'click');
+      };
+      info.setContent(body);
       info.open({ map, anchor: m });
     });
+    pinsAll.push(m);
     overlays.push(m); bounds.extend(ll(p));
   });
   const made = lines.map(l => l && new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l }));
@@ -333,7 +342,7 @@ function renderPlan() {
       ride: tr.l ? `${mi(ICON[tr.v] || 'tram', 'Public transport')} ${esc(tr.l)} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)}` : ''}` : '' };
   });
   draw(seq, seq.map((p, i) => i ? String(i) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }],   // pin number = position in the list
-    hops.map(h => h && `← ${esc(h.a.n)}<br>${h.walk} · ${h.dist}${h.ride ? '<br>' + h.ride : ''}`));
+    hops.map(h => h && `${h.walk} · ${h.dist}${h.ride ? '<br>' + h.ride : ''}`));
   seq.forEach((p, i) => {   // pub names under the pins, hop info on the lines
     if (!i) return;
     label(p, `${esc(p.n)} (${p.id})`, 'name');
@@ -423,7 +432,7 @@ async function run(origin) {
       labels.push(label);
       lines.push(best && { path: best.path, strokeColor: best.transit ? '#d93025' : '#1a73e8' });
       const ride = best?.transit && best.leg.steps.filter(x => x.travel_mode === 'TRANSIT');
-      infos.push(`← ${esc(prev.n)}<br>` + (!best ? 'no route' : ride
+      infos.push((!best ? '—' : ride
         ? `${ride.map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${hhmm(ride[0].transit.departure_time.value)} ${esc(ride[0].transit.departure_stop.name)} · arrives ${hhmm(t + best.secs * 1000)}`
         : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`));
       if (best) { t += best.secs * 1000; travel += best.secs; }
