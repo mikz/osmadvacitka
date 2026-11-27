@@ -34,6 +34,7 @@
   .mode.walk { color: #1a73e8; } .mode.transit { color: #d93025; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
+  .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
   .opt a { margin-left: 8px; font-size: 14px; }
   .leg ol { margin: 6px 0; padding-left: 20px; font-size: 14px; }
   .leg .row { display: flex; gap: 8px; margin-top: 8px; }
@@ -263,8 +264,12 @@ async function legBody(a, b, t) {
   let html = best ? `<small>leaving ${hhmm(t)} · fastest gets there ${hhmm(t + best.secs * 1000)}</small>` : '<small>No route found.</small>';
   if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">Walk · ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
     <a target="_blank" rel="noopener" href="${gm}walking">map</a></div>`;
-  rides.slice(0, 3).forEach(r => html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">Public transport · there in ${mins(r.secs)} (${hhmm(t + r.secs * 1000)})</span>
-    <a target="_blank" rel="noopener" href="${gm}transit">map</a><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`);
+  rides.slice(0, 3).forEach(r => {
+    const i = r.leg.steps.findIndex(x => x.travel_mode === 'TRANSIT');   // first vehicle: when it leaves, how far the stop is
+    const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
+    html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">Public transport · arrives ${hhmm(t + r.secs * 1000)}</span>
+    <a target="_blank" rel="noopener" href="${gm}transit">map</a><div class="cd" data-dep="${dep}" data-walk="${walk}"></div><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`;
+  });
   if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
   return { html, best };
 }
@@ -292,6 +297,7 @@ async function run(origin) {
       prev = s;
     }
     $('legs').innerHTML = html;
+    tick();
     $('summary').textContent = `${mins(travel)} travelling · finish at Petřín about ${hhmm(t)}`;
     draw([origin, ...stops], labels, lines);
   } catch (e) {
@@ -303,7 +309,23 @@ async function refresh(leg) {   // look the leg up again, leaving right now
   const body = leg.querySelector('.body');
   body.innerHTML = '<small>Looking up…</small>';
   body.innerHTML = (await legBody(stopById(leg.dataset.a), stopById(leg.dataset.b), Date.now())).html;
+  tick();
 }
+let lastAuto = 0;
+function tick() {   // countdowns; when every shown connection of the current leg has gone, look it up again
+  const now = Date.now();
+  document.querySelectorAll('.cd').forEach(el => {
+    const left = (el.dataset.dep - now) / 60000, walk = el.dataset.walk / 60, spare = left - walk;
+    const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
+    el.className = 'cd ' + state;
+    el.textContent = state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${Math.ceil(walk)} min walk to the stop · `
+      + (state === 'late' ? 'too late to catch' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min to spare`);
+  });
+  const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
+  if (!$('route').hidden && !document.hidden && cds.length && cds.every(c => /gone|late/.test(c.className)) && now - lastAuto > 60000) { lastAuto = now; refresh(cur); }
+}
+setInterval(tick, 10000);
+document.addEventListener('visibilitychange', tick);
 $('legs').onclick = e => {
   const leg = e.target.closest('.leg');
   if (e.target.dataset.refresh !== undefined) return refresh(leg);
