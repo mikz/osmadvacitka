@@ -72,7 +72,7 @@
     <p>Tick the 8 drawn pubs. Jamajka and Petřín are added automatically.</p>
     <div id="list"></div>
     <label class="min">Minutes spent in each pub <input id="pubMin" type="number" min="0" max="60" value="5" inputmode="numeric"></label>
-    <div class="bar"><button class="primary" id="plan" disabled>Plan route (0/8)</button></div>
+    <div class="bar"><button id="reload">Reload app</button><button class="primary" id="plan" disabled>Plan route (0/8)</button></div>
   </section>
   <div id="map" hidden></div>
   <div id="msg" role="alert"></div>
@@ -157,9 +157,13 @@ $('pubMin').onchange = () => store('pubMin', +$('pubMin').value);
 $('plan').onclick = () => { done = []; store('done', done); startPlan(START, picked()); };
 $('reset').onclick = () => {
   if (!confirm('Start a new draw? The current route is dropped.')) return;
-  done = []; store('done', undefined); store('order', undefined); store('plan', undefined); store('picked', undefined); boxes.forEach(b => b.checked = false); $('list').onchange(); history.replaceState(null, '', location.pathname);
-  view('draw');
+  done = []; store('done', undefined); store('order', undefined); store('plan', undefined); store('picked', undefined); boxes.forEach(b => b.checked = false); $('list').onchange(); hardReload();
 };
+async function hardReload() {   // installed apps have no reload button: refresh the cached files, then reopen
+  try { await Promise.all(['index.html', 'data.js', 'config.js'].map(u => fetch(u, { cache: 'reload' }))); } catch {}
+  location.replace(location.pathname + '?r=' + Date.now());
+}
+$('reload').onclick = hardReload;
 $('share').onclick = () => navigator.share ? navigator.share({ title: document.title, url: location.href }).catch(() => {})
   : navigator.clipboard.writeText(location.href).then(() => alert('Link copied'));
 $('replan').onclick = () => startPlan(mePos ? { id: 'me', n: 'You', ...mePos } : lastStop(), order.filter(id => !done.includes(id)));
