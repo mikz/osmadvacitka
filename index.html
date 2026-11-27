@@ -179,11 +179,18 @@ function view(name) {
   fsBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '⛶ Full screen', onclick: () => fullscreen() });
   map.controls[google.maps.ControlPosition.TOP_RIGHT].push(fsBtn);
   addEventListener('keydown', e => e.key === 'Escape' && fullscreen(false));
-  navigator.geolocation?.watchPosition(p => {
+  const geoMsg = e => e.code === 1
+    ? 'Location is blocked. On iPhone: Settings → Privacy & Security → Location Services → Safari Websites → While Using the App, then reopen the app.'
+    : 'Could not get your position yet.';
+  const locBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '◎ Me', onclick: () =>
+    navigator.geolocation.getCurrentPosition(p => { setMe(p); map.panTo(mePos); map.setZoom(Math.max(map.getZoom(), 16)); }, e => alert(geoMsg(e)), { enableHighAccuracy: true, timeout: 10000 }) });
+  map.controls[google.maps.ControlPosition.TOP_LEFT].push(locBtn);
+  const setMe = p => {
     mePos = { lat: p.coords.latitude, lng: p.coords.longitude };
     me ??= new google.maps.Marker({ map, zIndex: 999, title: 'You', icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
     me.setPosition(mePos);
-  }, () => {}, { enableHighAccuracy: true });
+  };
+  navigator.geolocation?.watchPosition(setMe, e => { if (e.code === 1) $('msg').textContent = geoMsg(e); }, { enableHighAccuracy: true });
 }
 let Lbl, lastBounds;
 function label(p, html, cls) {   // HTML label anchored to a map position
