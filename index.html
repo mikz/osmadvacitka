@@ -20,7 +20,12 @@
   button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; flex: 1; font-weight: 600; }
   button:disabled { opacity: .45; }
   #map { height: 45vh; margin: 0 -16px; }
-  #summary { padding: 12px 0; font-weight: 600; }
+  .sum { padding: 12px 0; font-weight: 600; }
+  .leg h3 button { padding: 4px 12px; }
+  details { padding: 12px 0; } summary { cursor: pointer; padding: 8px 0; }
+  #table { overflow-x: auto; } table { border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 4px 6px; text-align: right; border: 1px solid #8884; }
+  .w { color: #1a73e8; } .t { color: #d93025; }
   .leg { padding: 12px 0; border-bottom: 1px solid #8884; }
   .leg.done { opacity: .45; }
   .leg h3 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 8px; align-items: baseline; }
@@ -44,13 +49,23 @@
     <label class="min">Minutes spent in each pub <input id="pubMin" type="number" min="0" max="60" value="10" inputmode="numeric"></label>
     <div class="bar"><button class="primary" id="plan" disabled>Plan route (0/8)</button></div>
   </section>
+  <div id="map" hidden></div>
+  <div id="msg" role="alert"></div>
+  <section id="planv" hidden>
+    <div id="summaryP" class="sum" aria-live="polite"></div>
+    <div id="hops"></div>
+    <details><summary>All times between stops (min)</summary><div id="table"></div>
+      <small>Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
+    <div class="bar">
+      <button id="suggest">Suggest best</button>
+      <button class="primary" id="lock">Lock in</button>
+    </div>
+  </section>
   <section id="route" hidden>
-    <div id="map"></div>
-    <div id="summary" aria-live="polite"></div>
-    <div id="msg" role="alert"></div>
+    <div id="summary" class="sum" aria-live="polite"></div>
     <div id="legs"></div>
     <div class="bar">
-      <button class="primary" id="replan">Re-plan from here</button>
+      <button class="primary" id="replan">Re-plan</button>
       <button id="share">Share</button>
       <button id="reset">New draw</button>
     </div>
@@ -109,56 +124,105 @@ $('list').onchange = () => {
 };
 $('pubMin').value = load('pubMin', 10);
 $('pubMin').onchange = () => store('pubMin', +$('pubMin').value);
-$('plan').onclick = async () => {
-  done = []; store('done', done);
-  order = picked();
-  showRoute();
-  await run(START, true);
-};
+$('plan').onclick = () => { done = []; store('done', done); startPlan(START, picked()); };
 $('reset').onclick = () => {
   if (!confirm('Start a new draw? The current route is dropped.')) return;
   done = []; store('done', undefined); history.replaceState(null, '', location.pathname);
-  $('route').hidden = true; $('draw').hidden = false;
+  view('draw');
 };
 $('share').onclick = () => navigator.share ? navigator.share({ title: document.title, url: location.href }).catch(() => {})
   : navigator.clipboard.writeText(location.href).then(() => alert('Link copied'));
-$('replan').onclick = () => mePos ? run({ id: 'me', n: 'You', ...mePos }, true)
-  : alert('No GPS position yet. Allow location access and try again.');
+$('replan').onclick = () => startPlan(mePos ? { id: 'me', n: 'You', ...mePos } : lastStop(), order.filter(id => !done.includes(id)));
+$('suggest').onclick = () => { plan.ids = optimize(); renderPlan(); };
+$('lock').onclick = () => {
+  order = [...order.filter(id => done.includes(id)), ...plan.ids];
+  view('route'); run(plan.origin);
+};
+const lastStop = () => { const l = done.at(-1); return l === 'X' ? JAM : l ? pub(l) : START; };
 
-function showRoute() {
-  $('draw').hidden = true; $('route').hidden = false;
-  if (!map) {
-    map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
-    navigator.geolocation?.watchPosition(p => {
-      mePos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      me ??= new google.maps.Marker({ map, zIndex: 999, title: 'You', icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
-      me.setPosition(mePos);
-    }, () => {}, { enableHighAccuracy: true });
-  }
+function view(name) {
+  for (const v of ['draw', 'planv', 'route']) $(v).hidden = v !== name;
+  $('map').hidden = name === 'draw';
+  $('msg').textContent = '';
+  if (name === 'draw' || map) return;
+  map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+  navigator.geolocation?.watchPosition(p => {
+    mePos = { lat: p.coords.latitude, lng: p.coords.longitude };
+    me ??= new google.maps.Marker({ map, zIndex: 999, title: 'You', icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
+    me.setPosition(mePos);
+  }, () => {}, { enableHighAccuracy: true });
+}
+function draw(points, labels, lines) {   // pins + lines on the shared map
+  overlays.forEach(o => o.setMap(null)); overlays = [];
+  const bounds = new google.maps.LatLngBounds();
+  points.forEach((p, i) => { overlays.push(new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n })); bounds.extend(ll(p)); });
+  lines.forEach(l => overlays.push(new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l })));
+  map.fitBounds(bounds, 40);
 }
 
-// ---------- ordering ----------
-async function matrix(mode, origins, dests) {
+// ---------- planning: times between every pair, order by hand or by machine ----------
+let plan;   // { origin, ids, tail, from, to, w: {a: {b: {s, m}}}, t: {a: {b: s}} }
+async function matrix(mode, from, to) {
   const r = await new google.maps.DistanceMatrixService().getDistanceMatrix({
-    origins: origins.map(ll), destinations: dests.map(ll), travelMode: mode,
-    transitOptions: { departureTime: new Date() },
+    origins: from.map(ll), destinations: to.map(ll), travelMode: mode, transitOptions: { departureTime: new Date() },
   });
-  return r.rows.map(row => row.elements.map(e => e.status === 'OK' ? e.duration.value : Infinity));
+  return Object.fromEntries(r.rows.map((row, i) => [from[i].id, Object.fromEntries(row.elements.map((e, j) =>
+    [to[j].id, e.status === 'OK' ? { s: e.duration.value, m: e.distance.value } : { s: Infinity, m: 0 }]))]));
 }
-async function optimize(origin, ids) {
-  if (ids.length < 2) return ids;
-  const pubs = ids.map(pub), n = pubs.length;
-  const [w, t] = await Promise.all(['WALKING', 'TRANSIT'].map(m => matrix(m, [origin, ...pubs], [...pubs, JAM])));
-  const d = w.map((row, i) => row.map((v, j) => Math.min(v, t[i][j])));  // row 0 = origin, row k+1 = pub k; col k = pub k, col n = Jamajka
-  let best = Infinity, bestPath = null;
+const hop = (a, b) => Math.min(plan.w[a][b].s, plan.t[a][b].s);
+async function startPlan(origin, ids) {
+  const my = ++runId;
+  view('planv');
+  $('summaryP').textContent = 'Loading times…'; $('hops').innerHTML = $('table').innerHTML = '';
+  try {
+    const pubs = ids.map(pub), tail = done.includes('X') ? [PET] : [JAM, PET];
+    const from = [origin, ...pubs, ...tail.slice(0, -1)], to = [...pubs, ...tail];   // at most 10 x 10 = 100 elements
+    const [w, t] = await Promise.all(['WALKING', 'TRANSIT'].map(m => matrix(m, from, to)));
+    if (my !== runId) return;
+    plan = { origin, ids, tail, from, to, w, t };
+    plan.ids = optimize();
+    renderPlan();
+  } catch (e) { $('summaryP').textContent = ''; $('msg').textContent = 'Loading times failed: ' + (e.message || e); }
+}
+function optimize() {   // brute force, 8! = 40,320 orders
+  const ids = plan.ids, n = ids.length, end = plan.tail[0].id;
+  let best = Infinity, bestPath = ids;
   const path = [], used = Array(n).fill(false);
-  (function go(row, cost) {
+  (function go(at, cost) {
     if (cost >= best) return;
-    if (path.length === n) { cost += d[row][n]; if (cost < best) { best = cost; bestPath = [...path]; } return; }
-    for (let k = 0; k < n; k++) if (!used[k]) { used[k] = true; path.push(k); go(k + 1, cost + d[row][k]); path.pop(); used[k] = false; }
-  })(0, 0);
-  return bestPath.map(k => ids[k]);
+    if (path.length === n) { cost += hop(at, end); if (cost < best) { best = cost; bestPath = [...path]; } return; }
+    for (let k = 0; k < n; k++) if (!used[k]) { used[k] = true; path.push(ids[k]); go(ids[k], cost + hop(at, ids[k])); path.pop(); used[k] = false; }
+  })(plan.origin.id, 0);
+  return bestPath;
 }
+const km = m => m < 1000 ? m + ' m' : (m / 1000).toFixed(1) + ' km';
+function renderPlan() {
+  const seq = [plan.origin, ...plan.ids.map(pub), ...plan.tail], n = plan.ids.length;
+  let total = 0, html = '';
+  for (let i = 1; i < seq.length; i++) {
+    const a = seq[i - 1], b = seq[i], w = plan.w[a.id][b.id], t = plan.t[a.id][b.id].s, walk = w.s <= t;
+    total += Math.min(w.s, t);
+    const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
+      <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
+    html += `<div class="leg"><h3><span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
+      <small>from ${esc(a.n)}</small>
+      <div><span class="${walk ? 'mode walk' : ''}">walk ${mins(w.s)} · ${km(w.m)}</span> &nbsp;
+      <span class="${walk ? '' : 'mode transit'}">transit ${isFinite(t) ? mins(t) : '–'}</span></div></div>`;
+  }
+  $('hops').innerHTML = html;
+  const pubMin = (+$('pubMin').value || 0) * 60 * (seq.length - 2);
+  $('summaryP').textContent = `${mins(total)} travelling · finish about ${hhmm(Date.now() + (total + pubMin) * 1000)}`;
+  $('table').innerHTML = `<table><tr><th></th>${plan.to.map(b => `<th>${b.id}</th>`).join('')}</tr>${plan.from.map(a =>
+    `<tr><th>${a.id === 'me' ? '•' : a.id}</th>${plan.to.map(b => a.id === b.id ? '<td></td>'
+      : `<td class="${plan.w[a.id][b.id].s <= plan.t[a.id][b.id].s ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
+  draw(seq, seq.map((p, i) => i ? String(p.id) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }]);
+}
+$('hops').onclick = e => {
+  if (!e.target.dataset.mv) return;
+  const [i, d] = e.target.dataset.mv.split(',').map(Number), ids = plan.ids;
+  [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+  renderPlan();
+};
 
 // ---------- routing ----------
 async function directions(a, b, mode, t) {
@@ -179,38 +243,30 @@ const stepText = s => s.travel_mode === 'TRANSIT'
   ? `${s.transit.line.vehicle.name} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> ${esc(s.transit.departure_stop.name)} → ${esc(s.transit.arrival_stop.name)} (${esc(s.transit.departure_time.text)}, ${s.transit.num_stops} stops)`
   : `Walk ${esc(s.duration.text)}`;
 
-async function run(origin, reorder) {
+async function run(origin) {
   const my = ++runId;
-  $('msg').textContent = ''; $('summary').textContent = 'Planning…'; $('legs').innerHTML = '';
-  overlays.forEach(o => o.setMap(null)); overlays = [];
+  $('summary').textContent = 'Routing…'; $('legs').innerHTML = '';
   try {
-    const visited = order.filter(id => done.includes(id));
-    let todo = order.filter(id => !done.includes(id));
-    if (reorder) todo = await optimize(origin, todo);
-    if (my !== runId) return;
-    order = [...visited, ...todo];
+    const visited = order.filter(id => done.includes(id)), todo = order.filter(id => !done.includes(id));
     history.replaceState(null, '', '#' + order.join(','));
-
     const stops = [...todo.map(pub), ...(done.includes('X') ? [] : [JAM]), PET];
     const pubMin = (+$('pubMin').value || 0) * 60000;  // ms
-    const bounds = new google.maps.LatLngBounds();
-    const pin = (p, label) => { overlays.push(new google.maps.Marker({ map, position: ll(p), label, title: p.n })); bounds.extend(ll(p)); };
-    pin(origin, origin.id === 'S' ? 'S' : '•');
+    const labels = [origin.id === 'S' ? 'S' : '•'], lines = [];
     let t = Date.now(), prev = origin, travel = 0, html = '';
     for (const [i, s] of stops.entries()) {
       const opts = (await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(prev, s, m, t)))).filter(Boolean);
       if (my !== runId) return;
       const best = opts.sort((a, b) => a.secs - b.secs)[0];
       const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
-      pin(s, label);
+      labels.push(label);
       const gm = `https://www.google.com/maps/dir/?api=1&origin=${prev.lat},${prev.lng}&destination=${s.lat},${s.lng}&travelmode=`;
       if (best) {
         const transit = best.leg.steps.some(x => x.travel_mode === 'TRANSIT');
-        overlays.push(new google.maps.Polyline({ map, path: best.path, strokeColor: transit ? '#d93025' : '#1a73e8', strokeWeight: 5, strokeOpacity: .8 }));
+        lines.push({ path: best.path, strokeColor: transit ? '#d93025' : '#1a73e8' });
         t += best.secs * 1000; travel += best.secs;
         html += `<div class="leg"><h3><span>${label}. ${esc(s.n)}</span><small>arrive ${hhmm(t)}</small></h3>
           <small>${esc(s.a)} · ${esc(s.b)}</small>
-          <div class="mode ${transit ? 'transit' : 'walk'}">${transit ? 'Public transport' : 'Walk'} · ${mins(best.secs)} from ${esc(prev.n)}</div>
+          <div class="mode ${transit ? 'transit' : 'walk'}">${transit ? 'Public transport' : 'Walk'} · ${mins(best.secs)} · ${esc(best.leg.distance.text)} from ${esc(prev.n)}</div>
           ${transit ? `<ol>${best.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol>` : ''}
           <div class="row">${s.id === 'P' ? '' : `<button data-done="${s.id}">Done</button>`}
           <a class="btn" target="_blank" rel="noopener" href="${gm}${transit ? 'transit' : 'walking'}">Navigate</a></div></div>`;
@@ -223,18 +279,17 @@ async function run(origin, reorder) {
     }
     $('legs').innerHTML = html;
     $('summary').textContent = `${mins(travel)} travelling · finish at Petřín about ${hhmm(t)}`;
-    map.fitBounds(bounds, 40);
+    draw([origin, ...stops], labels, lines);
   } catch (e) {
     $('summary').textContent = '';
-    $('msg').textContent = 'Planning failed: ' + (e.message || e);
+    $('msg').textContent = 'Routing failed: ' + (e.message || e);
   }
 }
-$('legs').onclick = e => {
+$('legs').onclick = e => {   // Done only marks the stop; press Re-plan for fresh times
   const id = e.target.dataset.done;
   if (!id) return;
-  const stop = id === 'X' ? JAM : pub(id);
   done.push(id === 'X' ? 'X' : +id); store('done', done);
-  run(stop, false);   // keep the order, continue from the pub just finished
+  e.target.closest('.leg').classList.add('done'); e.target.remove();
 };
 
 // ---------- boot ----------
@@ -243,9 +298,8 @@ window.init = () => {
   if (new Set(ids).size !== 8) { done = []; return; }
   order = ids;
   done = done.filter(id => id === 'X' || ids.includes(id));
-  showRoute();
-  const last = done.at(-1);
-  run(last === 'X' ? JAM : last ? pub(last) : START, false);
+  view('route');
+  run(lastStop());
 };
 const s = document.createElement('script');
 s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(window.GOOGLE_MAPS_KEY || '')}&v=weekly&loading=async&callback=init`;
