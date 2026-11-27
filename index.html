@@ -64,7 +64,7 @@
     <div id="summaryP" class="sum" aria-live="polite"></div>
     <div id="hops"></div>
     <details><summary>All times between stops (min)</summary><div id="table"></div>
-      <small>Precomputed for Friday 19:00. Public transport counts the ride plus half the interval between connections as waiting. Locking in fetches live routes. Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
+      <small>Precomputed for Friday 19:00. Public transport counts the ride plus half the interval between connections (any line) as waiting. Locking in fetches live routes. Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
     <div class="bar">
       <button id="suggest">Suggest best</button>
       <button class="primary" id="lock">Lock in</button>
@@ -227,7 +227,7 @@ function renderPlan() {
     html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}<span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
       <small>from ${esc(a.n)}</small>
       <div><span class="${walk ? 'mode walk' : ''}">${WALK} ${mins(w.s)} · ${km(w.m)}</span></div>
-      <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${isFinite(tr.s) ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · every ~${Math.round(tr.f / 60)} min` : ''}` : '–'}</span></div></div>`;
+      <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · a connection every ~${Math.round(tr.f / 60)} min` : ''}` : 'no useful connection'}</span></div></div>`;
   }
   $('hops').innerHTML = html;
   const pubMin = (+$('pubMin').value || 0) * 60 * (seq.length - 2);
