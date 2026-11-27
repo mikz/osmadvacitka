@@ -28,7 +28,8 @@
   button:disabled { opacity: .45; }
   #map { height: 45vh; margin: 0 -16px; }
   .sum { padding: 12px 0; font-weight: 600; }
-  .grip { font-style: normal; font-size: 24px; padding: 4px 0 4px 6px; cursor: grab; touch-action: none; user-select: none; }
+  #hops .leg { position: relative; } #hops .leg[data-id] > div { padding-right: 100px; }
+  .grip { position: absolute; right: 0; top: 52px; width: 88px; height: 44px; display: grid; place-items: center; font-style: normal; font-size: 32px; line-height: 1; border: 1px solid #8886; border-radius: 10px; background: ButtonFace; color: ButtonText; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .sortable-ghost { opacity: .4; }
   .leg h3 button { padding: 4px 12px; }
   details { padding: 12px 0; } summary { cursor: pointer; padding: 8px 0; }
@@ -196,6 +197,7 @@ function label(p, html, cls) {   // HTML label anchored to a map position
 }
 function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is missing on iPhone
   on = $('map').classList.toggle('full', on);
+  map.setOptions({ gestureHandling: on ? 'greedy' : 'cooperative' });   // one finger pans in full screen; embedded keeps page scrolling
   fsBtn.textContent = on ? '✕ Exit full screen' : '⛶ Full screen';
   setTimeout(() => lastBounds && map.fitBounds(lastBounds, 40), 150);
 }
@@ -262,7 +264,7 @@ function renderPlan() {
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
-    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) · from ${esc(a.n)}</small></span>${mv}${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}</h3>
+    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) · from ${esc(a.n)}</small></span>${mv}</h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}
       <div><span class="${walk ? 'mode walk' : ''}">${WALK} ${mins(w.s)} · ${km(w.m)}</span></div>
       <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)} min` : ''}` : '—'}</span></div></div>`;
   }
