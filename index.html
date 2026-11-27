@@ -21,6 +21,8 @@
   button:disabled { opacity: .45; }
   #map { height: 45vh; margin: 0 -16px; }
   .sum { padding: 12px 0; font-weight: 600; }
+  .grip { font-style: normal; font-size: 24px; padding: 4px 10px 4px 0; cursor: grab; touch-action: none; user-select: none; }
+  .sortable-ghost { opacity: .4; }
   .leg h3 button { padding: 4px 12px; }
   details { padding: 12px 0; } summary { cursor: pointer; padding: 8px 0; }
   #table { overflow-x: auto; } table { border-collapse: collapse; font-size: 13px; }
@@ -75,6 +77,7 @@
     </div>
   </section>
 </main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
 <script src="config.js"></script>
 <script src="data.js"></script>
 <script>
@@ -214,7 +217,7 @@ function renderPlan() {
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
-    html += `<div class="leg"><h3><span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
+    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}<span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
       <small>from ${esc(a.n)}</small>
       <div><span class="${walk ? 'mode walk' : ''}">walk ${mins(w.s)} · ${km(w.m)}</span> &nbsp;
       <span class="${walk ? '' : 'mode transit'}">transit ${isFinite(t) ? mins(t) : '–'}</span></div></div>`;
@@ -227,6 +230,11 @@ function renderPlan() {
       : `<td class="${plan.w[a.id][b.id].s <= plan.t[a.id][b.id].s ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
   draw(seq, seq.map((p, i) => i ? String(p.id) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }]);
 }
+new Sortable($('hops'), {   // drag the ≡ handle; Jamajka and Petřín stay fixed at the end
+  handle: '.grip', draggable: '.leg[data-id]', animation: 150,
+  onMove: e => !!e.related.dataset.id,
+  onEnd: () => { plan.ids = [...document.querySelectorAll('#hops .leg[data-id]')].map(el => +el.dataset.id); renderPlan(); },
+});
 $('hops').onclick = e => {
   if (!e.target.dataset.mv) return;
   const [i, d] = e.target.dataset.mv.split(',').map(Number), ids = plan.ids;
