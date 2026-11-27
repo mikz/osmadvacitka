@@ -55,7 +55,7 @@
     <div id="summaryP" class="sum" aria-live="polite"></div>
     <div id="hops"></div>
     <details><summary>All times between stops (min)</summary><div id="table"></div>
-      <small>Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
+      <small>Times are precomputed for a Saturday afternoon; locking in fetches live routes. Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
     <div class="bar">
       <button id="suggest">Suggest best</button>
       <button class="primary" id="lock">Lock in</button>
@@ -72,6 +72,7 @@
   </section>
 </main>
 <script src="config.js"></script>
+<script src="data.js"></script>
 <script>
 // [sheet number, name, address, beer, lat, lng] – geocoded once, hardcoded on purpose
 const PUBS = [
@@ -176,8 +177,10 @@ async function startPlan(origin, ids) {
   $('summaryP').textContent = 'Loading times…'; $('hops').innerHTML = $('table').innerHTML = '';
   try {
     const pubs = ids.map(pub), tail = done.includes('X') ? [PET] : [JAM, PET];
-    const from = [origin, ...pubs, ...tail.slice(0, -1)], to = [...pubs, ...tail];   // at most 10 x 10 = 100 elements
-    const [w, t] = await Promise.all(['WALKING', 'TRANSIT'].map(m => matrix(m, from, to)));
+    const from = [origin, ...pubs, ...tail.slice(0, -1)], to = [...pubs, ...tail];
+    // stored times cover start + all pubs; only a GPS origin needs a live lookup (one row)
+    const w = { ...TIMES.w }, t = { ...TIMES.t };
+    if (origin.id === 'me') [w.me, t.me] = (await Promise.all(['WALKING', 'TRANSIT'].map(m => matrix(m, [origin], to)))).map(r => r.me);
     if (my !== runId) return;
     plan = { origin, ids, tail, from, to, w, t };
     plan.ids = optimize();
