@@ -136,15 +136,18 @@ const boxes = [...document.querySelectorAll('#list input')];
 const picked = () => boxes.filter(b => b.checked).map(b => +b.value);
 $('list').onchange = () => {
   const n = picked().length;
+  store('picked', picked());   // survive a reload
   $('plan').disabled = n !== 8;
   $('plan').textContent = `Plan route (${n}/8)`;
 };
+load('picked', []).forEach(id => { const b = boxes.find(x => +x.value === id); if (b) b.checked = true; });
+$('list').onchange();
 $('pubMin').value = load('pubMin', 5);
 $('pubMin').onchange = () => store('pubMin', +$('pubMin').value);
 $('plan').onclick = () => { done = []; store('done', done); startPlan(START, picked()); };
 $('reset').onclick = () => {
   if (!confirm('Start a new draw? The current route is dropped.')) return;
-  done = []; store('done', undefined); store('order', undefined); history.replaceState(null, '', location.pathname);
+  done = []; store('done', undefined); store('order', undefined); store('plan', undefined); store('picked', undefined); boxes.forEach(b => b.checked = false); $('list').onchange(); history.replaceState(null, '', location.pathname);
   view('draw');
 };
 $('share').onclick = () => navigator.share ? navigator.share({ title: document.title, url: location.href }).catch(() => {})
@@ -153,6 +156,7 @@ $('replan').onclick = () => startPlan(mePos ? { id: 'me', n: 'You', ...mePos } :
 $('suggest').onclick = () => { plan.ids = optimize(); renderPlan(); };
 $('lock').onclick = () => {
   order = [...order.filter(id => done.includes(id)), ...plan.ids];
+  store('plan', undefined);
   view('route'); run(plan.origin);
 };
 const lastStop = () => { const l = done.at(-1); return l === 'X' ? JAM : l ? pub(l) : START; };
@@ -192,7 +196,7 @@ async function matrix(mode, from, to) {
 }
 const tcost = (a, b) => plan.t[a][b].s + (plan.t[a][b].f ?? 600) / 2;   // ride + half the interval as expected wait
 const hop = (a, b) => Math.min(plan.w[a][b].s, tcost(a, b));
-async function startPlan(origin, ids) {
+async function startPlan(origin, ids, keepOrder) {
   const my = ++runId;
   view('planv');
   $('summaryP').textContent = 'Loading times…'; $('hops').innerHTML = $('table').innerHTML = '';
@@ -207,7 +211,7 @@ async function startPlan(origin, ids) {
     }
     if (my !== runId) return;
     plan = { origin, ids, tail, from, to, w, t };
-    plan.ids = optimize();
+    if (!keepOrder) plan.ids = optimize();
     renderPlan();
   } catch (e) { $('summaryP').textContent = ''; $('msg').textContent = 'Loading times failed: ' + (e.message || e); }
 }
@@ -224,6 +228,7 @@ function optimize() {   // brute force, 8! = 40,320 orders
 }
 const km = m => m < 1000 ? m + ' m' : (m / 1000).toFixed(1) + ' km';
 function renderPlan() {
+  store('plan', { origin: plan.origin, ids: plan.ids });   // an order being arranged survives a reload
   const seq = [plan.origin, ...plan.ids.map(pub), ...plan.tail], n = plan.ids.length;
   let total = 0, html = '';
   for (let i = 1; i < seq.length; i++) {
@@ -406,9 +411,10 @@ $('legs').onchange = e => {   // Done is a checkbox, so a slip can be undone
 window.init = () => {
   let ids = location.hash.slice(1).split(',').map(Number).filter(pub);
   if (!ids.length) ids = load('order', []).filter(pub);
-  if (new Set(ids).size !== 8) { done = []; return; }
-  order = ids;
-  done = done.filter(id => id === 'X' || ids.includes(id));
+  const saved = load('plan');
+  if (new Set(ids).size === 8) { order = ids; done = done.filter(id => id === 'X' || ids.includes(id)); } else done = [];
+  if (saved && saved.ids?.every(pub)) return startPlan(saved.origin, saved.ids, true);   // was arranging an order
+  if (!order.length) return;
   view('route');
   run(lastStop());
 };
