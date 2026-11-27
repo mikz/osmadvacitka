@@ -42,6 +42,12 @@
   .mode { font-weight: 600; }
   .mode.walk { color: #1a73e8; } .mode.transit { color: #d93025; }
   .mi { font-family: 'Material Symbols Outlined'; font-size: 1.25em; line-height: 1; vertical-align: -0.2em; font-weight: normal; font-style: normal; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-feature-settings: 'liga'; font-feature-settings: 'liga'; color: CanvasText; }
+  #map.full { position: fixed; inset: 0; height: auto; margin: 0; z-index: 10; }
+  .fsbtn { margin: 10px; padding: 8px 12px; font-size: 14px; background: #fff; color: #000; box-shadow: 0 1px 4px #0006; }
+  #map.full .fsbtn { margin-top: calc(10px + env(safe-area-inset-top)); }
+  .lbl { position: absolute; white-space: nowrap; font: 600 12px/1.3 system-ui, sans-serif; background: #fffe; color: #000; padding: 1px 6px; border-radius: 8px; box-shadow: 0 1px 3px #0005; pointer-events: none; }
+  .lbl.name { transform: translate(-50%, 4px); } .lbl.hop { transform: translate(-50%, -50%); font-weight: 500; background: #ffe9a8; }
+  .lbl .mi { color: #000; font-size: 15px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
   .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
@@ -164,16 +170,36 @@ const lastStop = () => { const l = done.at(-1); return l === 'X' ? JAM : l ? pub
 function view(name) {
   for (const v of ['draw', 'planv', 'route']) $(v).hidden = v !== name;
   $('map').hidden = name === 'draw';
+  if (map) fullscreen(false);
   document.querySelector('header').hidden = name !== 'draw';   // title only on the draw screen
   $('msg').textContent = '';
   if (name === 'draw' || map) return;
   map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+  fsBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '⛶ Full screen', onclick: () => fullscreen() });
+  map.controls[google.maps.ControlPosition.TOP_RIGHT].push(fsBtn);
+  addEventListener('keydown', e => e.key === 'Escape' && fullscreen(false));
   navigator.geolocation?.watchPosition(p => {
     mePos = { lat: p.coords.latitude, lng: p.coords.longitude };
     me ??= new google.maps.Marker({ map, zIndex: 999, title: 'You', icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
     me.setPosition(mePos);
   }, () => {}, { enableHighAccuracy: true });
 }
+let Lbl, lastBounds;
+function label(p, html, cls) {   // HTML label anchored to a map position
+  Lbl ??= class extends google.maps.OverlayView {
+    constructor(p, html, cls) { super(); this.p = p; this.el = Object.assign(document.createElement('div'), { className: 'lbl ' + cls, innerHTML: html }); }
+    onAdd() { this.getPanes().floatPane.append(this.el); }
+    draw() { const q = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.p)); this.el.style.left = q.x + 'px'; this.el.style.top = q.y + 'px'; }
+    onRemove() { this.el.remove(); }
+  };
+  const o = new Lbl(p, html, cls); o.setMap(map); overlays.push(o);
+}
+function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is missing on iPhone
+  on = $('map').classList.toggle('full', on);
+  fsBtn.textContent = on ? '✕ Exit full screen' : '⛶ Full screen';
+  setTimeout(() => lastBounds && map.fitBounds(lastBounds, 40), 150);
+}
+let fsBtn;
 function draw(points, labels, lines) {   // pins + lines on the shared map
   overlays.forEach(o => o.setMap(null)); overlays = [];
   const bounds = new google.maps.LatLngBounds();
@@ -181,7 +207,7 @@ function draw(points, labels, lines) {   // pins + lines on the shared map
   const made = lines.map(l => l && new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l }));
   const pins = overlays.slice();
   overlays.push(...made.filter(Boolean));
-  map.fitBounds(bounds, 40);
+  map.fitBounds(lastBounds = bounds, 40);
   return { pins, lines: made };
 }
 
@@ -246,7 +272,14 @@ function renderPlan() {
   $('table').innerHTML = `<table><tr><th></th>${plan.to.map(b => `<th>${b.id}</th>`).join('')}</tr>${plan.from.map(a =>
     `<tr><th>${a.id === 'me' ? '•' : a.id}</th>${plan.to.map(b => a.id === b.id ? '<td></td>'
       : `<td class="${plan.w[a.id][b.id].s <= tcost(a.id, b.id) ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
-  draw(seq, seq.map((p, i) => i ? String(p.id) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }]);
+  draw(seq, seq.map((p, i) => i ? String(i) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }]);   // pin number = position in the list
+  seq.forEach((p, i) => {   // pub names under the pins, hop info on the lines
+    if (!i) return;
+    label(p, `${esc(p.n)} (${p.id})`, 'name');
+    const a = seq[i - 1], w = plan.w[a.id][p.id], tr = plan.t[a.id][p.id];
+    label({ lat: (a.lat + p.lat) / 2, lng: (a.lng + p.lng) / 2 }, w.s <= tcost(a.id, p.id) ? `${WALK} ${mins(w.s)}`
+      : `${mi(ICON[tr.v] || 'tram', 'Public transport')} ${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)}` : ''}`, 'hop');
+  });
 }
 new Sortable($('hops'), {   // drag the ≡ handle; Jamajka and Petřín stay fixed at the end
   handle: '.grip', draggable: '.leg[data-id]', animation: 150,
