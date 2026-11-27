@@ -366,7 +366,7 @@ async function run(origin) {
       if (best) { t += best.secs * 1000; travel += best.secs; }
       html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${label}. ${esc(s.n)}</span></h3>
         <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
-        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections now</button></div></div>`;
+        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections</button><button data-zoom>Show on map</button></div></div>`;
       if (s.id !== 'P') t += pubMin;
       prev = s;
     }
@@ -375,6 +375,7 @@ async function run(origin) {
     $('summary').textContent = `${mins(travel)} travel · finish ${hhmm(t)}`;
     const ov = draw([origin, ...stops], labels, lines);
     legOv = Object.fromEntries(stops.map((x, i) => [x.id, [ov.pins[i + 1], ov.lines[i]]]));
+    stops.forEach(x => label(x, esc(x.n), 'name'));
   } catch (e) {
     $('summary').textContent = '';
     $('msg').textContent = 'Routing failed: ' + (e.message || e);
@@ -436,7 +437,14 @@ function tick() {   // countdowns; when every shown connection of the current le
 }
 setInterval(tick, 10000);
 document.addEventListener('visibilitychange', tick);
-$('legs').onclick = e => { if (e.target.dataset.refresh !== undefined) refresh(e.target.closest('.leg')); };
+$('legs').onclick = e => {
+  const leg = e.target.closest('.leg');
+  if (e.target.dataset.refresh !== undefined) refresh(leg);
+  if (e.target.dataset.zoom !== undefined) {   // full-screen map zoomed on the venue
+    fullscreen(true);
+    setTimeout(() => { map.setCenter(ll(stopById(leg.dataset.b))); map.setZoom(17); }, 250);
+  }
+};
 $('legs').onchange = e => {   // Done is a checkbox, so a slip can be undone
   const raw = e.target.dataset.done;
   if (!raw) return;
