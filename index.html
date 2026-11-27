@@ -32,6 +32,9 @@
   .leg h3 span { flex: 1; }
   .mode { font-weight: 600; }
   .mode.walk { color: #1a73e8; } .mode.transit { color: #d93025; }
+  .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
+  .opt.best { border-left-color: currentColor; }
+  .opt a { margin-left: 8px; font-size: 14px; }
   .leg ol { margin: 6px 0; padding-left: 20px; font-size: 14px; }
   .leg .row { display: flex; gap: 8px; margin-top: 8px; }
   .leg .row > * { padding: 8px 12px; font-size: 14px; }
@@ -230,27 +233,44 @@ $('hops').onclick = e => {
   renderPlan();
 };
 
-// ---------- routing ----------
-async function directions(a, b, mode, t) {
+// ---------- routing: every leg shows the walk and the next connections ----------
+let routeOrigin = START;
+const stopById = id => id === 'S' ? START : id === 'X' ? JAM : id === 'P' ? PET : id === 'me' ? routeOrigin : pub(id);
+async function directions(a, b, mode, t) {   // -> list of options, soonest arrival first
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const r = await new google.maps.DirectionsService().route({ origin: ll(a), destination: ll(b), travelMode: mode, transitOptions: { departureTime: new Date(t) } });
-      const leg = r.routes[0].legs[0];
-      const secs = leg.arrival_time ? (leg.arrival_time.value - t) / 1000 : leg.duration.value;  // transit: include the wait
-      return { mode, secs, leg, path: r.routes[0].overview_path };
+      const r = await new google.maps.DirectionsService().route({ origin: ll(a), destination: ll(b), travelMode: mode,
+        transitOptions: { departureTime: new Date(t) }, provideRouteAlternatives: mode === 'TRANSIT' });
+      return r.routes.map(x => {
+        const leg = x.legs[0];
+        return { leg, path: x.overview_path, transit: leg.steps.some(st => st.travel_mode === 'TRANSIT'),
+          secs: leg.arrival_time ? (leg.arrival_time.value - t) / 1000 : leg.duration.value };   // transit: include the wait
+      }).filter(o => o.transit === (mode === 'TRANSIT')).sort((x, y) => x.secs - y.secs);
     } catch (e) {
-      if (e.code !== 'OVER_QUERY_LIMIT') return null;
+      if (e.code !== 'OVER_QUERY_LIMIT') return [];
       await new Promise(r => setTimeout(r, 1500));
     }
   }
-  return null;
+  return [];
 }
 const stepText = s => s.travel_mode === 'TRANSIT'
-  ? `${s.transit.line.vehicle.name} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> ${esc(s.transit.departure_stop.name)} → ${esc(s.transit.arrival_stop.name)} (${esc(s.transit.departure_time.text)}, ${s.transit.num_stops} stops)`
-  : `Walk ${esc(s.duration.text)}`;
-
+  ? `${esc(s.transit.line.vehicle.name)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> towards ${esc(s.transit.headsign || '')}: <b>${esc(s.transit.departure_time.text)}</b> ${esc(s.transit.departure_stop.name)} → ${esc(s.transit.arrival_time.text)} ${esc(s.transit.arrival_stop.name)} (${s.transit.num_stops} stops)`
+  : `Walk ${esc(s.duration.text)} · ${esc(s.distance.text)}`;
+async function legBody(a, b, t) {
+  const [walks, rides] = await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(a, b, m, t)));
+  const walk = walks[0], best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
+  const gm = `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=`;
+  let html = best ? `<small>leaving ${hhmm(t)} · fastest gets there ${hhmm(t + best.secs * 1000)}</small>` : '<small>No route found.</small>';
+  if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">Walk · ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
+    <a target="_blank" rel="noopener" href="${gm}walking">map</a></div>`;
+  rides.slice(0, 3).forEach(r => html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">Public transport · there in ${mins(r.secs)} (${hhmm(t + r.secs * 1000)})</span>
+    <a target="_blank" rel="noopener" href="${gm}transit">map</a><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`);
+  if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
+  return { html, best };
+}
 async function run(origin) {
   const my = ++runId;
+  routeOrigin = origin;
   $('summary').textContent = 'Routing…'; $('legs').innerHTML = '';
   try {
     const visited = order.filter(id => done.includes(id)), todo = order.filter(id => !done.includes(id));
@@ -260,26 +280,14 @@ async function run(origin) {
     const labels = [origin.id === 'S' ? 'S' : '•'], lines = [];
     let t = Date.now(), prev = origin, travel = 0, html = '';
     for (const [i, s] of stops.entries()) {
-      const opts = (await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(prev, s, m, t)))).filter(Boolean);
+      const { html: body, best } = await legBody(prev, s, t);
       if (my !== runId) return;
-      const best = opts.sort((a, b) => a.secs - b.secs)[0];
       const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
       labels.push(label);
-      const gm = `https://www.google.com/maps/dir/?api=1&origin=${prev.lat},${prev.lng}&destination=${s.lat},${s.lng}&travelmode=`;
-      if (best) {
-        const transit = best.leg.steps.some(x => x.travel_mode === 'TRANSIT');
-        lines.push({ path: best.path, strokeColor: transit ? '#d93025' : '#1a73e8' });
-        t += best.secs * 1000; travel += best.secs;
-        html += `<div class="leg"><h3><span>${label}. ${esc(s.n)}</span><small>arrive ${hhmm(t)}</small></h3>
-          <small>${esc(s.a)} · ${esc(s.b)}</small>
-          <div class="mode ${transit ? 'transit' : 'walk'}">${transit ? 'Public transport' : 'Walk'} · ${mins(best.secs)} · ${esc(best.leg.distance.text)} from ${esc(prev.n)}</div>
-          ${transit ? `<ol>${best.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol>` : ''}
-          <div class="row">${s.id === 'P' ? '' : `<button data-done="${s.id}">Done</button>`}
-          <a class="btn" target="_blank" rel="noopener" href="${gm}${transit ? 'transit' : 'walking'}">Navigate</a></div></div>`;
-      } else {
-        html += `<div class="leg"><h3><span>${label}. ${esc(s.n)}</span></h3><small>No route found.</small>
-          <div class="row"><a class="btn" target="_blank" rel="noopener" href="${gm}transit">Open in Google Maps</a></div></div>`;
-      }
+      if (best) { lines.push({ path: best.path, strokeColor: best.transit ? '#d93025' : '#1a73e8' }); t += best.secs * 1000; travel += best.secs; }
+      html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${label}. ${esc(s.n)}</span></h3>
+        <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
+        <div class="row">${s.id === 'P' ? '' : `<button data-done="${s.id}">Done</button>`}<button data-refresh>Next connections now</button></div></div>`;
       if (s.id !== 'P') t += pubMin;
       prev = s;
     }
@@ -291,11 +299,19 @@ async function run(origin) {
     $('msg').textContent = 'Routing failed: ' + (e.message || e);
   }
 }
-$('legs').onclick = e => {   // Done only marks the stop; press Re-plan for fresh times
+async function refresh(leg) {   // look the leg up again, leaving right now
+  const body = leg.querySelector('.body');
+  body.innerHTML = '<small>Looking up…</small>';
+  body.innerHTML = (await legBody(stopById(leg.dataset.a), stopById(leg.dataset.b), Date.now())).html;
+}
+$('legs').onclick = e => {
+  const leg = e.target.closest('.leg');
+  if (e.target.dataset.refresh !== undefined) return refresh(leg);
   const id = e.target.dataset.done;
   if (!id) return;
   done.push(id === 'X' ? 'X' : +id); store('done', done);
-  e.target.closest('.leg').classList.add('done'); e.target.remove();
+  leg.classList.add('done'); e.target.remove();
+  if (leg.nextElementSibling) refresh(leg.nextElementSibling);   // beer finished: show what leaves now
 };
 
 // ---------- boot ----------
