@@ -29,7 +29,7 @@
   td, th { padding: 4px 6px; text-align: right; border: 1px solid #8884; }
   .w { color: #1a73e8; } .t { color: #d93025; }
   .leg { padding: 12px 0; border-bottom: 1px solid #8884; }
-  .leg.done { opacity: .45; }
+  .leg.done .body, .leg.done small, .leg.done h3 { opacity: .45; }
   .leg h3 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 8px; align-items: baseline; }
   .leg h3 span { flex: 1; }
   .mode { font-weight: 600; }
@@ -38,7 +38,8 @@
   .opt.best { border-left-color: currentColor; }
   .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
   .opt a { margin-left: 8px; font-size: 14px; }
-  .leg ol { margin: 6px 0; padding-left: 20px; font-size: 14px; }
+  .leg ul { margin: 6px 0; padding-left: 0; list-style: none; font-size: 14px; }
+  .row label { display: flex; align-items: center; gap: 8px; font-weight: 600; } .row input { width: 24px; height: 24px; }
   .leg .row { display: flex; gap: 8px; margin-top: 8px; }
   .leg .row > * { padding: 8px 12px; font-size: 14px; }
   label.min { display: block; padding: 12px 0; }
@@ -61,7 +62,7 @@
     <div id="summaryP" class="sum" aria-live="polite"></div>
     <div id="hops"></div>
     <details><summary>All times between stops (min)</summary><div id="table"></div>
-      <small>Times are precomputed for Friday 19:00; locking in fetches live routes. Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
+      <small>Times are precomputed for Friday 19:00; locking in fetches live routes. Rows = from, columns = to. Blue = 🚶 walking is faster, red = 🚋 public transport. S start, X Jamajka, P Petřín.</small></details>
     <div class="bar">
       <button id="suggest">Suggest best</button>
       <button class="primary" id="lock">Lock in</button>
@@ -112,7 +113,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ll = p => ({ lat: p.lat, lng: p.lng });
 const mins = s => Math.round(s / 60) + ' min';
-const hhmm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const hhmm = t => new Date(t).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });   // 24h
 const store = (k, v) => { try { v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 
@@ -164,8 +165,11 @@ function draw(points, labels, lines) {   // pins + lines on the shared map
   overlays.forEach(o => o.setMap(null)); overlays = [];
   const bounds = new google.maps.LatLngBounds();
   points.forEach((p, i) => { overlays.push(new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n })); bounds.extend(ll(p)); });
-  lines.forEach(l => overlays.push(new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l })));
+  const made = lines.map(l => l && new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l }));
+  const pins = overlays.slice();
+  overlays.push(...made.filter(Boolean));
   map.fitBounds(bounds, 40);
+  return { pins, lines: made };
 }
 
 // ---------- planning: times between every pair, order by hand or by machine ----------
@@ -219,8 +223,8 @@ function renderPlan() {
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
     html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}<span>${i}. ${esc(b.n)} <small style="display:inline">(${b.id})</small></span>${mv}</h3>
       <small>from ${esc(a.n)}</small>
-      <div><span class="${walk ? 'mode walk' : ''}">walk ${mins(w.s)} · ${km(w.m)}</span> &nbsp;
-      <span class="${walk ? '' : 'mode transit'}">transit ${isFinite(t) ? mins(t) : '–'}</span></div></div>`;
+      <div><span class="${walk ? 'mode walk' : ''}">🚶 ${mins(w.s)} · ${km(w.m)}</span> &nbsp;
+      <span class="${walk ? '' : 'mode transit'}">🚋 ${isFinite(t) ? mins(t) : '–'}</span></div></div>`;
   }
   $('hops').innerHTML = html;
   const pubMin = (+$('pubMin').value || 0) * 60 * (seq.length - 2);
@@ -243,7 +247,7 @@ $('hops').onclick = e => {
 };
 
 // ---------- routing: every leg shows the walk and the next connections ----------
-let routeOrigin = START;
+let routeOrigin = START, legOv = {};
 const stopById = id => id === 'S' ? START : id === 'X' ? JAM : id === 'P' ? PET : id === 'me' ? routeOrigin : pub(id);
 async function directions(a, b, mode, t) {   // -> list of options, soonest arrival first
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -262,22 +266,25 @@ async function directions(a, b, mode, t) {   // -> list of options, soonest arri
   }
   return [];
 }
+const ICON = { TRAM: '🚋', SUBWAY: '🚇', METRO_RAIL: '🚇', BUS: '🚌', TROLLEYBUS: '🚎', FUNICULAR: '🚠', FERRY: '⛴️', HEAVY_RAIL: '🚆', RAIL: '🚆', COMMUTER_TRAIN: '🚆' };
+const icon = s => `<span role="img" aria-label="${esc(s.transit.line.vehicle.name)}">${ICON[s.transit.line.vehicle.type] || '🚍'}</span>`;
+const WALK = '<span role="img" aria-label="Walk">🚶</span>';
 const stepText = s => s.travel_mode === 'TRANSIT'
-  ? `${esc(s.transit.line.vehicle.name)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> towards ${esc(s.transit.headsign || '')}: <b>${esc(s.transit.departure_time.text)}</b> ${esc(s.transit.departure_stop.name)} → ${esc(s.transit.arrival_time.text)} ${esc(s.transit.arrival_stop.name)} (${s.transit.num_stops} stops${s.transit.headway ? `, every ${Math.round(s.transit.headway / 60)} min` : ''})`
-  : `Walk ${esc(s.duration.text)} · ${esc(s.distance.text)}`;
+  ? `${icon(s)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> → ${esc(s.transit.headsign || '')}: <b>${hhmm(s.transit.departure_time.value)}</b> ${esc(s.transit.departure_stop.name)} → ${hhmm(s.transit.arrival_time.value)} ${esc(s.transit.arrival_stop.name)} (${s.transit.num_stops} stops${s.transit.headway ? `, every ${Math.round(s.transit.headway / 60)} min` : ''})`
+  : `${WALK} ${mins(s.duration.value)} · ${esc(s.distance.text)}`;
 async function legBody(a, b, t) {
   const [walks, rides] = await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(a, b, m, t)));
   const walk = walks[0], best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
   const gm = `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=`;
   let html = best ? `<small>leaving ${hhmm(t)} · fastest gets there ${hhmm(t + best.secs * 1000)}</small>` : '<small>No route found.</small>';
-  if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">Walk · ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
+  if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">${WALK} ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
     <a target="_blank" rel="noopener" href="${gm}walking">map</a></div>`;
   rides.slice(0, 3).forEach(r => {
     const i = r.leg.steps.findIndex(x => x.travel_mode === 'TRANSIT');   // first vehicle: when it leaves, how far the stop is
     const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
-    html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">Public transport · arrives ${hhmm(t + r.secs * 1000)}</span>
+    html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">${r.leg.steps.filter(x => x.travel_mode === 'TRANSIT').map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · arrives ${hhmm(t + r.secs * 1000)}</span>
     <a target="_blank" rel="noopener" href="${gm}transit">map</a>
-    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">IDOS</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}"></div><small class="nx"></small><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`;
+    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">IDOS</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
   });
   if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
   return { html, best };
@@ -298,17 +305,19 @@ async function run(origin) {
       if (my !== runId) return;
       const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
       labels.push(label);
-      if (best) { lines.push({ path: best.path, strokeColor: best.transit ? '#d93025' : '#1a73e8' }); t += best.secs * 1000; travel += best.secs; }
+      lines.push(best && { path: best.path, strokeColor: best.transit ? '#d93025' : '#1a73e8' });
+      if (best) { t += best.secs * 1000; travel += best.secs; }
       html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${label}. ${esc(s.n)}</span></h3>
         <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
-        <div class="row">${s.id === 'P' ? '' : `<button data-done="${s.id}">Done</button>`}<button data-refresh>Next connections now</button></div></div>`;
+        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections now</button></div></div>`;
       if (s.id !== 'P') t += pubMin;
       prev = s;
     }
     $('legs').innerHTML = html;
     tick();
     $('summary').textContent = `${mins(travel)} travelling · finish at Petřín about ${hhmm(t)}`;
-    draw([origin, ...stops], labels, lines);
+    const ov = draw([origin, ...stops], labels, lines);
+    legOv = Object.fromEntries(stops.map((x, i) => [x.id, [ov.pins[i + 1], ov.lines[i]]]));
   } catch (e) {
     $('summary').textContent = '';
     $('msg').textContent = 'Routing failed: ' + (e.message || e);
@@ -361,8 +370,8 @@ function tick() {   // countdowns; when every shown connection of the current le
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
     const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · live: ${d >= 60 ? '+' + Math.round(d / 60) + ' min late' : 'on time'}`;
-    el.textContent = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${Math.ceil(walk)} min walk to the stop · `
-      + (state === 'late' ? 'too late to catch' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min to spare`)) + live;
+    el.textContent = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · 🚶 ${Math.ceil(walk)} min to stop · `
+      + (state === 'late' ? 'too late' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min spare`)) + live;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
@@ -370,14 +379,17 @@ function tick() {   // countdowns; when every shown connection of the current le
 }
 setInterval(tick, 10000);
 document.addEventListener('visibilitychange', tick);
-$('legs').onclick = e => {
-  const leg = e.target.closest('.leg');
-  if (e.target.dataset.refresh !== undefined) return refresh(leg);
-  const id = e.target.dataset.done;
-  if (!id) return;
-  done.push(id === 'X' ? 'X' : +id); store('done', done);
-  leg.classList.add('done'); e.target.remove();
-  if (leg.nextElementSibling) refresh(leg.nextElementSibling);   // beer finished: show what leaves now
+$('legs').onclick = e => { if (e.target.dataset.refresh !== undefined) refresh(e.target.closest('.leg')); };
+$('legs').onchange = e => {   // Done is a checkbox, so a slip can be undone
+  const raw = e.target.dataset.done;
+  if (!raw) return;
+  const id = raw === 'X' ? 'X' : +raw, leg = e.target.closest('.leg'), on = e.target.checked;
+  done = done.filter(x => x !== id); if (on) done.push(id);
+  store('done', done);
+  leg.classList.toggle('done', on);
+  (legOv[raw] || []).forEach(o => o && o.setMap(on ? null : map));   // finished legs leave the map
+  if (on && leg.nextElementSibling) refresh(leg.nextElementSibling);   // beer finished: show what leaves now
+  tick();
 };
 
 // ---------- boot ----------
