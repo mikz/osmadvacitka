@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Osmadvacítka">
 <meta name="theme-color" content="#202124">
 <meta name="color-scheme" content="light dark">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,directions_bus,directions_walk,funicular,subway,train,tram&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,directions_bus,directions_walk,funicular,location_on,subway,train,tram&display=block">
 <title>Osmadvacítka – route</title>
 <style>
   * { box-sizing: border-box; }
@@ -54,6 +54,7 @@
   .ride { padding-left: 26px; }
   .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
   .hopn::after { content: ''; position: absolute; right: -2px; bottom: -5px; border: 4px solid transparent; border-left-color: currentColor; border-right-width: 0; }
+  .zb { padding: 2px 6px; margin-right: 6px; border-radius: 8px; vertical-align: middle; } .zb .mi { pointer-events: none; font-size: 22px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
   .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
@@ -218,6 +219,11 @@ function label(p, html, cls) {   // HTML label anchored to a map position
   };
   const o = new Lbl(p, html, cls); o.setMap(map); overlays.push(o);
 }
+const zoomBtn = id => `<button class="zb" data-zoom="${id}" aria-label="Show on map">${mi('location_on', '')}</button>`;
+function zoomTo(p) {   // full-screen map focused on one point
+  fullscreen(true);
+  setTimeout(() => { map.setCenter(ll(p)); map.setZoom(17); }, 700);
+}
 function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is missing on iPhone
   on = $('map').classList.toggle('full', on);
   map.setOptions({ gestureHandling: on ? 'greedy' : 'cooperative' });   // one finger pans in full screen; embedded keeps page scrolling
@@ -297,7 +303,7 @@ function renderPlan() {
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
-    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) <span aria-label="from">←</span> ${esc(a.n)}</small></span>${mv}</h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}
+    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${zoomBtn(b.id)}${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) <span aria-label="from">←</span> ${esc(a.n)}</small></span>${mv}</h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}
       <div><span class="${walk ? 'mode walk' : ''}">${WALK} ${mins(w.s)} · ${km(w.m)}</span></div>
       <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)} min` : ''}` : '—'}</span></div></div>`;
   }
@@ -327,6 +333,8 @@ new Sortable($('hops'), {   // drag the ≡ handle; Jamajka and Petřín stay fi
   onEnd: () => { plan.ids = [...document.querySelectorAll('#hops .leg[data-id]')].map(el => +el.dataset.id); renderPlan(); },
 });
 $('hops').onclick = e => {
+  const z = e.target.closest('[data-zoom]');
+  if (z) return zoomTo(stopById(z.dataset.zoom));
   if (!e.target.dataset.mv) return;
   const [i, d] = e.target.dataset.mv.split(',').map(Number), ids = plan.ids;
   [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
@@ -373,7 +381,7 @@ async function legBody(a, b, t) {
     const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
     html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">${r.leg.steps.filter(x => x.travel_mode === 'TRANSIT').map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · arrives ${hhmm(t + r.secs * 1000)}</span>
     <a target="_blank" rel="noopener" href="${gm}transit">map</a>
-    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">IDOS</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
+    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">IDOS</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}" data-v="${ICON[r.leg.steps[i].transit.line.vehicle.type] || 'directions_bus'}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
   });
   if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
   return { html, best };
@@ -400,9 +408,9 @@ async function run(origin) {
         ? `${ride.map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${hhmm(ride[0].transit.departure_time.value)} ${esc(ride[0].transit.departure_stop.name)} · arrives ${hhmm(t + best.secs * 1000)}`
         : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`));
       if (best) { t += best.secs * 1000; travel += best.secs; }
-      html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${label}. ${esc(s.n)}</span></h3>
+      html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${zoomBtn(s.id)}${label}. ${esc(s.n)}</span></h3>
         <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
-        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections</button><button data-zoom>Show on map</button></div></div>`;
+        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections</button></div></div>`;
       if (s.id !== 'P') t += pubMin;
       prev = s;
     }
@@ -446,8 +454,8 @@ async function liveDelays(root) {
       // how often this line leaves from the same platform
       const at = x => new Date(x.departure_timestamp.predicted || x.departure_timestamp.scheduled).getTime();
       const next = brd.filter(x => x.route.short_name === line && x.stop.id === d.stop.id && at(x) > Date.now() - 30000).slice(0, 4).map(at);
-      el.nextElementSibling.textContent = `Line ${line} from ${el.dataset.stop}: ${next.map(hhmm).join(', ')}`
-        + (next.length > 1 ? ` · about every ${Math.round((next.at(-1) - next[0]) / (next.length - 1) / 60000)} min` : '');
+      el.nextElementSibling.innerHTML = `${mi(el.dataset.v, 'Next departures')} <b>${esc(line)}</b> ${next.map(hhmm).join(' · ')}`
+        + (next.length > 1 ? ` · ${mi('autorenew', 'every')} ${Math.round((next.at(-1) - next[0]) / (next.length - 1) / 60000)}` : '');
       if (d.trip.is_canceled) { el.dataset.delay = 'x'; continue; }
       if (!d.delay.is_available) continue;
       el.dataset.delay = d.delay.seconds || 0;
@@ -476,10 +484,8 @@ document.addEventListener('visibilitychange', tick);
 $('legs').onclick = e => {
   const leg = e.target.closest('.leg');
   if (e.target.dataset.refresh !== undefined) refresh(leg);
-  if (e.target.dataset.zoom !== undefined) {   // full-screen map zoomed on the venue
-    fullscreen(true);
-    setTimeout(() => { map.setCenter(ll(stopById(leg.dataset.b))); map.setZoom(17); }, 250);
-  }
+  const z = e.target.closest('[data-zoom]');
+  if (z) zoomTo(stopById(z.dataset.zoom));
 };
 $('legs').onchange = e => {   // Done is a checkbox, so a slip can be undone
   const raw = e.target.dataset.done;
