@@ -27,7 +27,7 @@
   button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; flex: 1; font-weight: 600; }
   button:disabled { opacity: .45; }
   #map { height: 45vh; margin: 0 -16px; }
-  .sum { padding: 12px 0; font-weight: 600; }
+  .sum { padding: 12px 0; font-weight: 600; position: sticky; top: env(safe-area-inset-top, 0px); background: Canvas; z-index: 5; border-bottom: 1px solid #8884; }
   #hops .leg { position: relative; } #hops .leg[data-id] > div { padding-right: 100px; }
   .grip { position: absolute; right: 0; top: 52px; width: 88px; height: 44px; display: grid; place-items: center; font-style: normal; font-size: 32px; line-height: 1; border: 1px solid #8886; border-radius: 10px; background: ButtonFace; color: ButtonText; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
   .sortable-ghost { opacity: .4; }
