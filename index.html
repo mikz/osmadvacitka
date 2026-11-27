@@ -63,7 +63,7 @@
   .zb { padding: 2px 6px; margin-right: 6px; border-radius: 8px; vertical-align: middle; } .zb .mi { pointer-events: none; font-size: 22px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
-  .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
+  .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late { color: #d93025; } .cd.gone { opacity: .6; text-decoration: line-through; }
   .opt a { margin-left: 8px; font-size: 14px; }
   .leg ul { margin: 6px 0; padding-left: 0; list-style: none; font-size: 14px; }
   .row label { display: flex; align-items: center; gap: 8px; font-weight: 600; } .row input { width: 24px; height: 24px; }
@@ -165,7 +165,8 @@ $('pubMin').value = load('pubMin', 5);
 $('pubMin').onchange = () => store('pubMin', +$('pubMin').value);
 $('plan').onclick = () => { done = []; store('done', done); startPlan(START, picked()); };
 $('reset').onclick = () => {
-  if (!confirm('Start a new draw? The current route is dropped.')) return;
+  const b = $('reset');   // tap twice: confirm() dialogs are blocked in some browsers
+  if (b.textContent !== 'Sure?') { b.textContent = 'Sure?'; return setTimeout(() => b.textContent = 'New draw', 3000); }
   done = []; store('done', undefined); store('order', undefined); store('plan', undefined); store('picked', undefined); boxes.forEach(b => b.checked = false); $('list').onchange(); hardReload();
 };
 async function hardReload() {   // installed apps have no reload button: refresh the cached files, then reopen
@@ -505,11 +506,11 @@ function tick() {   // countdowns; when every shown connection of the current le
     const mmss = x => (x >= 60 ? `${Math.floor(x / 60)}:${p2(x % 60)}` : Math.floor(x)) + ':' + p2(x * 60 % 60);   // m:ss, or h:mm:ss
     // walk icon: start walking in m:ss; vehicle icon: it leaves in m:ss
     el.innerHTML = (state === 'gone' ? `${mi(el.dataset.v, 'Departed')} —`
-      : `${mi('directions_walk', 'Start walking in')} ${state === 'late' ? '✗' : state === 'tight' ? 'run! ' + mmss(spare) : mmss(spare)} → ${mi(el.dataset.v, 'Leaves in')} ${mmss(left)}`) + live;
+      : `${mi('directions_walk', 'Start walking in')} ${state === 'late' ? '−' + mmss(-spare) : state === 'tight' ? 'run! ' + mmss(spare) : mmss(spare)} → ${mi(el.dataset.v, 'Leaves in')} ${mmss(left)}`) + live;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
-  if (!$('route').hidden && !document.hidden && cds.length && cds.every(c => /gone|late/.test(c.className)) && now - lastAuto > 60000) { lastAuto = now; refresh(cur); }
+  if (!$('route').hidden && !document.hidden && cds.length && cds.every(c => /gone/.test(c.className)) && now - lastAuto > 60000) { lastAuto = now; refresh(cur); }
 }
 setInterval(tick, 1000);   // tick tick tick
 document.addEventListener('visibilitychange', tick);
