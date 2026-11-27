@@ -412,7 +412,7 @@ async function legBody(a, b, t) {
     <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">${mi('departure_board', 'Timetable on IDOS')}</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}" data-v="${ICON[r.leg.steps[i].transit.line.vehicle.type] || 'directions_bus'}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
   });
   if (!rides.length) html += `<div class="opt">${mi('tram', 'No public transport connection')} —</div>`;
-  return { html, best };
+  return { html, best, walk };
 }
 async function run(origin) {
   const my = ++runId;
@@ -426,7 +426,7 @@ async function run(origin) {
     const labels = [origin.id === 'S' ? 'S' : '•'], lines = [], infos = [''];
     let t = Date.now(), prev = origin, travel = 0, html = '';
     for (const [i, s] of stops.entries()) {
-      const { html: body, best } = await legBody(prev, s, t);
+      const { html: body, best, walk } = await legBody(prev, s, t);
       if (my !== runId) return;
       const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
       labels.push(label);
@@ -434,7 +434,8 @@ async function run(origin) {
       const ride = best?.transit && best.leg.steps.filter(x => x.travel_mode === 'TRANSIT');
       infos.push((!best ? '—' : ride
         ? `${ride.map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${hhmm(ride[0].transit.departure_time.value)} ${esc(ride[0].transit.departure_stop.name)} · arrives ${hhmm(t + best.secs * 1000)}`
-        : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`));
+        : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`)
+        + (ride && walk ? `<br>${WALK} ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}` : ''));   // on foot, in case you miss it
       if (best) { t += best.secs * 1000; travel += best.secs; }
       html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${zoomBtn(s.id)}${label}. ${esc(s.n)}</span></h3>
         <small>${esc(s.a)} · ${esc(s.b)} <span aria-label="from">←</span> ${esc(prev.n)}</small><div class="body">${body}</div>
@@ -500,7 +501,8 @@ function tick() {   // countdowns; when every shown connection of the current le
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
     const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · ${mi('sensors', 'live')} ${d >= 60 ? '+' + Math.round(d / 60) : '0'}`;
-    const mmss = x => `${Math.floor(x)}:${String(Math.floor(x * 60 % 60)).padStart(2, '0')}`;
+    const p2 = n => String(Math.floor(n)).padStart(2, '0');
+    const mmss = x => (x >= 60 ? `${Math.floor(x / 60)}:${p2(x % 60)}` : Math.floor(x)) + ':' + p2(x * 60 % 60);   // m:ss, or h:mm:ss
     // walk icon: start walking in m:ss; vehicle icon: it leaves in m:ss
     el.innerHTML = (state === 'gone' ? `${mi(el.dataset.v, 'Departed')} —`
       : `${mi('directions_walk', 'Start walking in')} ${state === 'late' ? '✗' : state === 'tight' ? 'run! ' + mmss(spare) : mmss(spare)} → ${mi(el.dataset.v, 'Leaves in')} ${mmss(left)}`) + live;
