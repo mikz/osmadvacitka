@@ -268,7 +268,7 @@ async function legBody(a, b, t) {
     const i = r.leg.steps.findIndex(x => x.travel_mode === 'TRANSIT');   // first vehicle: when it leaves, how far the stop is
     const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
     html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">Public transport · arrives ${hhmm(t + r.secs * 1000)}</span>
-    <a target="_blank" rel="noopener" href="${gm}transit">map</a><div class="cd" data-dep="${dep}" data-walk="${walk}"></div><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`;
+    <a target="_blank" rel="noopener" href="${gm}transit">map</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}"></div><ol>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol></div>`;
   });
   if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
   return { html, best };
@@ -311,16 +311,45 @@ async function refresh(leg) {   // look the leg up again, leaving right now
   body.innerHTML = (await legBody(stopById(leg.dataset.a), stopById(leg.dataset.b), Date.now())).html;
   tick();
 }
-let lastAuto = 0;
+// Live delays from Prague's PID (Golemio) departure boards; needs window.GOLEMIO_TOKEN in config.js
+const boards = {};   // stop name -> { at, data }
+async function board(stop) {
+  const c = boards[stop];
+  if (c && Date.now() - c.at < 25000) return c.data;
+  const r = await fetch('https://api.golemio.cz/v2/pid/departureboards?minutesBefore=5&minutesAfter=90&limit=60&names=' + encodeURIComponent(stop),
+    { headers: { 'X-Access-Token': window.GOLEMIO_TOKEN } });
+  const data = r.ok ? (await r.json()).departures || [] : [];
+  boards[stop] = { at: Date.now(), data };
+  return data;
+}
+async function liveDelays(root) {
+  if (!window.GOLEMIO_TOKEN) return;
+  for (const el of root.querySelectorAll('.cd[data-line]')) {
+    try {
+      const sched = +el.dataset.sched;
+      const d = (await board(el.dataset.stop)).find(x => x.route.short_name === el.dataset.line
+        && Math.abs(new Date(x.departure_timestamp.scheduled) - sched) <= 90000);
+      if (!d) continue;
+      if (d.trip.is_canceled) { el.dataset.delay = 'x'; continue; }
+      if (!d.delay.is_available) continue;
+      el.dataset.delay = d.delay.seconds || 0;
+      el.dataset.dep = new Date(d.departure_timestamp.predicted).getTime();
+    } catch {}
+  }
+}
+const cur0 = () => $('route').hidden ? null : document.querySelector('#legs .leg:not(.done)');
+let lastAuto = 0, lastLive = 0;
 function tick() {   // countdowns; when every shown connection of the current leg has gone, look it up again
   const now = Date.now();
   document.querySelectorAll('.cd').forEach(el => {
     const left = (el.dataset.dep - now) / 60000, walk = el.dataset.walk / 60, spare = left - walk;
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
-    el.textContent = state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${Math.ceil(walk)} min walk to the stop · `
-      + (state === 'late' ? 'too late to catch' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min to spare`);
+    const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · live: ${d >= 60 ? '+' + Math.round(d / 60) + ' min late' : 'on time'}`;
+    el.textContent = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${Math.ceil(walk)} min walk to the stop · `
+      + (state === 'late' ? 'too late to catch' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min to spare`)) + live;
   });
+  if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
   if (!$('route').hidden && !document.hidden && cds.length && cds.every(c => /gone|late/.test(c.className)) && now - lastAuto > 60000) { lastAuto = now; refresh(cur); }
 }
