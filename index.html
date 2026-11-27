@@ -501,12 +501,12 @@ function tick() {   // countdowns; when every shown connection of the current le
     const left = (el.dataset.dep - now) / 60000, walk = el.dataset.walk / 60, spare = left - walk;
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
-    const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · ${mi('sensors', 'live')} ${d >= 60 ? '+' + Math.round(d / 60) : '0'}`;
+    const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : d >= 60 ? ` · ${Math.round(d / 60)} min late` : ' · on time';
     const p2 = n => String(Math.floor(n)).padStart(2, '0');
     const mmss = x => (x >= 60 ? `${Math.floor(x / 60)}:${p2(x % 60)}` : Math.floor(x)) + ':' + p2(x * 60 % 60);   // m:ss, or h:mm:ss
-    // walk icon: start walking in m:ss; vehicle icon: it leaves in m:ss
-    el.innerHTML = (state === 'gone' ? `${mi(el.dataset.v, 'Departed')} —`
-      : `${mi('directions_walk', 'Start walking in')} ${state === 'late' ? '−' + mmss(-spare) : state === 'tight' ? 'run! ' + mmss(spare) : mmss(spare)} → ${mi(el.dataset.v, 'Leaves in')} ${mmss(left)}`) + live;
+    // plain words here: when to get up and go, when the vehicle leaves, live delay
+    el.innerHTML = state === 'gone' ? 'Departed' : `<b>${state === 'late' ? `Late by ${mmss(-spare)}, run` : state === 'tight' ? `Go now, ${mmss(spare)} left` : `Go in ${mmss(spare)}`}</b>`
+      + ` · ${mi(el.dataset.v, '')} leaves in ${mmss(left)}${live}`;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
