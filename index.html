@@ -183,7 +183,13 @@ function view(name) {
   document.querySelector('header').hidden = name !== 'draw';   // title only on the draw screen
   $('msg').textContent = '';
   if (name === 'draw' || map) return;
-  map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+  map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false,
+    styles: [   // only our points and public transport matter
+      { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+      { featureType: 'poi.park', elementType: 'geometry', stylers: [{ visibility: 'on' }] },
+      { featureType: 'transit', stylers: [{ visibility: 'on' }] },
+    ] });
+  info = new google.maps.InfoWindow();
   fsBtn = Object.assign(document.createElement('button'), { className: 'fsbtn', textContent: '⛶ Full screen', onclick: () => fullscreen() });
   map.controls[google.maps.ControlPosition.TOP_RIGHT].push(fsBtn);
   addEventListener('keydown', e => e.key === 'Escape' && fullscreen(false));
@@ -201,7 +207,7 @@ function view(name) {
   };
   navigator.geolocation?.watchPosition(setMe, e => { if (e.code === 1) $('msg').textContent = geoMsg(e); }, { enableHighAccuracy: true });
 }
-let Lbl, lastBounds;
+let Lbl, lastBounds, info;
 function label(p, html, cls) {   // HTML label anchored to a map position
   Lbl ??= class extends google.maps.OverlayView {
     constructor(p, html, cls) { super(); this.p = p; this.el = Object.assign(document.createElement('div'), { className: 'lbl ' + cls, innerHTML: html }); }
@@ -221,7 +227,15 @@ let fsBtn;
 function draw(points, labels, lines) {   // pins + lines on the shared map
   overlays.forEach(o => o.setMap(null)); overlays = [];
   const bounds = new google.maps.LatLngBounds();
-  points.forEach((p, i) => { overlays.push(new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n })); bounds.extend(ll(p)); });
+  points.forEach((p, i) => {
+    const m = new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n });
+    m.addListener('click', () => {   // tap a pin: which pub, where, what beer
+      info.setContent(`<div style="color:#000;font:14px system-ui"><b>${esc(p.n)}</b>${typeof p.id === 'number' ? ` (${p.id})` : ''}${p.a ? `<br>${esc(p.a)} · ${esc(p.b)}` : ''}
+        <br><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}">Open in Google Maps</a></div>`);
+      info.open({ map, anchor: m });
+    });
+    overlays.push(m); bounds.extend(ll(p));
+  });
   const made = lines.map(l => l && new google.maps.Polyline({ map, strokeWeight: 5, strokeOpacity: .8, ...l }));
   const pins = overlays.slice();
   overlays.push(...made.filter(Boolean));
