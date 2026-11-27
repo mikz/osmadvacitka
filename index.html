@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Osmadvacítka – route</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; }
+  header { padding: 12px 16px; font-weight: 700; font-size: 18px; }
+  main { padding: 0 16px 96px; max-width: 640px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+  .pub { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #8884; }
+  .pub input { width: 24px; height: 24px; flex: none; }
+  .pub b { display: inline-block; min-width: 1.8em; }
+  small { opacity: .7; display: block; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px; background: Canvas; border-top: 1px solid #8884; display: flex; gap: 8px; }
+  button, .btn { font: inherit; padding: 12px 14px; border-radius: 10px; border: 1px solid #8886; background: ButtonFace; color: ButtonText; text-decoration: none; cursor: pointer; }
+  button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; flex: 1; font-weight: 600; }
+  button:disabled { opacity: .45; }
+  #map { height: 45vh; margin: 0 -16px; }
+  #summary { padding: 12px 0; font-weight: 600; }
+  .leg { padding: 12px 0; border-bottom: 1px solid #8884; }
+  .leg.done { opacity: .45; }
+  .leg h3 { margin: 0 0 4px; font-size: 16px; display: flex; gap: 8px; align-items: baseline; }
+  .leg h3 span { flex: 1; }
+  .mode { font-weight: 600; }
+  .mode.walk { color: #1a73e8; } .mode.transit { color: #d93025; }
+  .leg ol { margin: 6px 0; padding-left: 20px; font-size: 14px; }
+  .leg .row { display: flex; gap: 8px; margin-top: 8px; }
+  .leg .row > * { padding: 8px 12px; font-size: 14px; }
+  label.min { display: block; padding: 12px 0; }
+  label.min input { width: 4em; font: inherit; padding: 6px; }
+  #msg { padding: 12px 0; color: #d93025; }
+</style>
+</head>
+<body>
+<header>28° Osmadvacítka</header>
+<main>
+  <section id="draw">
+    <p>Tick the 8 drawn pubs. Jamajka and Petřín are added automatically.</p>
+    <div id="list"></div>
+    <label class="min">Minutes spent in each pub <input id="pubMin" type="number" min="0" max="60" value="10" inputmode="numeric"></label>
+    <div class="bar"><button class="primary" id="plan" disabled>Plan route (0/8)</button></div>
+  </section>
+  <section id="route" hidden>
+    <div id="map"></div>
+    <div id="summary" aria-live="polite"></div>
+    <div id="msg" role="alert"></div>
+    <div id="legs"></div>
+    <div class="bar">
+      <button class="primary" id="replan">Re-plan from here</button>
+      <button id="share">Share</button>
+      <button id="reset">New draw</button>
+    </div>
+  </section>
+</main>
+<script src="config.js"></script>
+<script>
+// [sheet number, name, address, beer, lat, lng] – geocoded once, hardcoded on purpose
+const PUBS = [
+  [1, 'Branická Formanka', 'Vodičkova 26', 'Braník 10', 50.0803262, 14.423935],
+  [2, 'U Dvou Koček', 'Uhelný trh 10', 'Plzeň nebo Kočka', 50.0836408, 14.4204633],
+  [3, 'V Koutku', 'Elišky Peškové 3', 'Staráč 10', 50.0771868, 14.4052225],
+  [4, 'U Váhy', 'Nádražní 88', 'Plzeň', 50.0690193, 14.4062849],
+  [5, 'U Rotundy', 'Karolíny Světlé 17', 'Staráč 10', 50.0825898, 14.4145014],
+  [6, 'Konírna', 'Anenská 11', 'Bernard 10', 50.0854874, 14.4157084],
+  [7, 'U Staré Pošty', 'Opletalova 17', 'Gambáč 12 nebo Plzeň', 50.0825941, 14.4311598],
+  [8, 'U Starého Lva', 'Lidická 13', 'Staráč 10 nebo Rohozec 10', 50.0724274, 14.4086505],
+  [9, 'U Kalendů', 'Rašínovo nábřeží 58', 'Plzeň', 50.0712819, 14.4144453],
+  [10, 'Brouk', 'Vltavská 22', 'Radek nebo Plzeň', 50.0698476, 14.40688],
+  [11, 'U Rudolfina', 'Křížovnická 10', 'Plzeň', 50.0880561, 14.4155471],
+  [12, 'Techno Bar', 'Vratislavova 1', 'Páter 11 nebo Plzeň', 50.0672177, 14.4173677],
+  [13, 'U Libuše', 'Podskalská 7', 'Staráč 10 nebo Bráník 11', 50.06869, 14.4155556],
+  [14, 'U Suché Dásně', 'Trojická 11', 'Radek nebo Plzeň', 50.07081, 14.4163144],
+  [15, 'Knoflík', 'Bozděchova 3', 'Staráč 10', 50.0702505, 14.4046856],
+  [16, 'U Olmerů', 'Slavojova 16', 'Min 10', 50.0637582, 14.4253144],
+  [17, 'U Templáře', 'Masná 17', 'Gambáč 11 nebo Plzeň', 50.0897644, 14.4251094],
+  [18, 'Hospůdka Na Hradbách', 'V Pevnosti 144', 'Min 10', 50.0636012, 14.4220077],
+  [19, 'Billiard klub Albertov', 'Na Slupi 3', 'Chodovar 10', 50.0671482, 14.42131],
+  [20, 'U Žaludů', 'Na Zbořenci 5', 'Min 10', 50.0773088, 14.4171375],
+].map(([id, n, a, b, lat, lng]) => ({ id, n, a, b, lat, lng }));
+const START = { id: 'S', n: 'Palackého náměstí', lat: 50.0732449, lng: 14.4145186 };
+const JAM = { id: 'X', n: 'Jamajka', a: 'Staropramenná 2', b: 'Min 10', lat: 50.0697855, lng: 14.4073846 };
+const PET = { id: 'P', n: 'Petřín – rozhledna', a: 'lahváč', b: 'Min 10', lat: 50.083527, lng: 14.3950837 };
+const pub = id => PUBS.find(p => p.id == id);
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ll = p => ({ lat: p.lat, lng: p.lng });
+const mins = s => Math.round(s / 60) + ' min';
+const hhmm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const store = (k, v) => { try { v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+
+let order = [];                 // pub ids in visiting order
+let done = load('done', []);    // ids already visited (pub ids and 'X')
+let map, overlays = [], me, mePos, runId = 0;
+
+// ---------- draw view ----------
+$('list').innerHTML = PUBS.map(p =>
+  `<label class="pub"><input type="checkbox" value="${p.id}"><span><b>${p.id}</b> ${esc(p.n)}<small>${esc(p.a)} · ${esc(p.b)}</small></span></label>`).join('');
+const boxes = [...document.querySelectorAll('#list input')];
+const picked = () => boxes.filter(b => b.checked).map(b => +b.value);
+$('list').onchange = () => {
+  const n = picked().length;
+  $('plan').disabled = n !== 8;
+  $('plan').textContent = `Plan route (${n}/8)`;
+};
+$('pubMin').value = load('pubMin', 10);
+$('pubMin').onchange = () => store('pubMin', +$('pubMin').value);
+$('plan').onclick = async () => {
+  done = []; store('done', done);
+  order = picked();
+  showRoute();
+  await run(START, true);
+};
+$('reset').onclick = () => {
+  if (!confirm('Start a new draw? The current route is dropped.')) return;
+  done = []; store('done', undefined); history.replaceState(null, '', location.pathname);
+  $('route').hidden = true; $('draw').hidden = false;
+};
+$('share').onclick = () => navigator.share ? navigator.share({ title: document.title, url: location.href }).catch(() => {})
+  : navigator.clipboard.writeText(location.href).then(() => alert('Link copied'));
+$('replan').onclick = () => mePos ? run({ id: 'me', n: 'You', ...mePos }, true)
+  : alert('No GPS position yet. Allow location access and try again.');
+
+function showRoute() {
+  $('draw').hidden = true; $('route').hidden = false;
+  if (!map) {
+    map = new google.maps.Map($('map'), { center: ll(START), zoom: 14, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+    navigator.geolocation?.watchPosition(p => {
+      mePos = { lat: p.coords.latitude, lng: p.coords.longitude };
+      me ??= new google.maps.Marker({ map, zIndex: 999, title: 'You', icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#1a73e8', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
+      me.setPosition(mePos);
+    }, () => {}, { enableHighAccuracy: true });
+  }
+}
+
+// ---------- ordering ----------
+async function matrix(mode, origins, dests) {
+  const r = await new google.maps.DistanceMatrixService().getDistanceMatrix({
+    origins: origins.map(ll), destinations: dests.map(ll), travelMode: mode,
+    transitOptions: { departureTime: new Date() },
+  });
+  return r.rows.map(row => row.elements.map(e => e.status === 'OK' ? e.duration.value : Infinity));
+}
+async function optimize(origin, ids) {
+  if (ids.length < 2) return ids;
+  const pubs = ids.map(pub), n = pubs.length;
+  const [w, t] = await Promise.all(['WALKING', 'TRANSIT'].map(m => matrix(m, [origin, ...pubs], [...pubs, JAM])));
+  const d = w.map((row, i) => row.map((v, j) => Math.min(v, t[i][j])));  // row 0 = origin, row k+1 = pub k; col k = pub k, col n = Jamajka
+  let best = Infinity, bestPath = null;
+  const path = [], used = Array(n).fill(false);
+  (function go(row, cost) {
+    if (cost >= best) return;
+    if (path.length === n) { cost += d[row][n]; if (cost < best) { best = cost; bestPath = [...path]; } return; }
+    for (let k = 0; k < n; k++) if (!used[k]) { used[k] = true; path.push(k); go(k + 1, cost + d[row][k]); path.pop(); used[k] = false; }
+  })(0, 0);
+  return bestPath.map(k => ids[k]);
+}
+
+// ---------- routing ----------
+async function directions(a, b, mode, t) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await new google.maps.DirectionsService().route({ origin: ll(a), destination: ll(b), travelMode: mode, transitOptions: { departureTime: new Date(t) } });
+      const leg = r.routes[0].legs[0];
+      const secs = leg.arrival_time ? (leg.arrival_time.value - t) / 1000 : leg.duration.value;  // transit: include the wait
+      return { mode, secs, leg, path: r.routes[0].overview_path };
+    } catch (e) {
+      if (e.code !== 'OVER_QUERY_LIMIT') return null;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  return null;
+}
+const stepText = s => s.travel_mode === 'TRANSIT'
+  ? `${s.transit.line.vehicle.name} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> ${esc(s.transit.departure_stop.name)} → ${esc(s.transit.arrival_stop.name)} (${esc(s.transit.departure_time.text)}, ${s.transit.num_stops} stops)`
+  : `Walk ${esc(s.duration.text)}`;
+
+async function run(origin, reorder) {
+  const my = ++runId;
+  $('msg').textContent = ''; $('summary').textContent = 'Planning…'; $('legs').innerHTML = '';
+  overlays.forEach(o => o.setMap(null)); overlays = [];
+  try {
+    const visited = order.filter(id => done.includes(id));
+    let todo = order.filter(id => !done.includes(id));
+    if (reorder) todo = await optimize(origin, todo);
+    if (my !== runId) return;
+    order = [...visited, ...todo];
+    history.replaceState(null, '', '#' + order.join(','));
+
+    const stops = [...todo.map(pub), ...(done.includes('X') ? [] : [JAM]), PET];
+    const pubMin = (+$('pubMin').value || 0) * 60000;  // ms
+    const bounds = new google.maps.LatLngBounds();
+    const pin = (p, label) => { overlays.push(new google.maps.Marker({ map, position: ll(p), label, title: p.n })); bounds.extend(ll(p)); };
+    pin(origin, origin.id === 'S' ? 'S' : '•');
+    let t = Date.now(), prev = origin, travel = 0, html = '';
+    for (const [i, s] of stops.entries()) {
+      const opts = (await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(prev, s, m, t)))).filter(Boolean);
+      if (my !== runId) return;
+      const best = opts.sort((a, b) => a.secs - b.secs)[0];
+      const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
+      pin(s, label);
+      const gm = `https://www.google.com/maps/dir/?api=1&origin=${prev.lat},${prev.lng}&destination=${s.lat},${s.lng}&travelmode=`;
+      if (best) {
+        const transit = best.leg.steps.some(x => x.travel_mode === 'TRANSIT');
+        overlays.push(new google.maps.Polyline({ map, path: best.path, strokeColor: transit ? '#d93025' : '#1a73e8', strokeWeight: 5, strokeOpacity: .8 }));
+        t += best.secs * 1000; travel += best.secs;
+        html += `<div class="leg"><h3><span>${label}. ${esc(s.n)}</span><small>arrive ${hhmm(t)}</small></h3>
+          <small>${esc(s.a)} · ${esc(s.b)}</small>
+          <div class="mode ${transit ? 'transit' : 'walk'}">${transit ? 'Public transport' : 'Walk'} · ${mins(best.secs)} from ${esc(prev.n)}</div>
+          ${transit ? `<ol>${best.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ol>` : ''}
+          <div class="row">${s.id === 'P' ? '' : `<button data-done="${s.id}">Done</button>`}
+          <a class="btn" target="_blank" rel="noopener" href="${gm}${transit ? 'transit' : 'walking'}">Navigate</a></div></div>`;
+      } else {
+        html += `<div class="leg"><h3><span>${label}. ${esc(s.n)}</span></h3><small>No route found.</small>
+          <div class="row"><a class="btn" target="_blank" rel="noopener" href="${gm}transit">Open in Google Maps</a></div></div>`;
+      }
+      if (s.id !== 'P') t += pubMin;
+      prev = s;
+    }
+    $('legs').innerHTML = html;
+    $('summary').textContent = `${mins(travel)} travelling · finish at Petřín about ${hhmm(t)}`;
+    map.fitBounds(bounds, 40);
+  } catch (e) {
+    $('summary').textContent = '';
+    $('msg').textContent = 'Planning failed: ' + (e.message || e);
+  }
+}
+$('legs').onclick = e => {
+  const id = e.target.dataset.done;
+  if (!id) return;
+  const stop = id === 'X' ? JAM : pub(id);
+  done.push(id === 'X' ? 'X' : +id); store('done', done);
+  run(stop, false);   // keep the order, continue from the pub just finished
+};
+
+// ---------- boot ----------
+window.init = () => {
+  const ids = location.hash.slice(1).split(',').map(Number).filter(pub);
+  if (new Set(ids).size !== 8) { done = []; return; }
+  order = ids;
+  done = done.filter(id => id === 'X' || ids.includes(id));
+  showRoute();
+  const last = done.at(-1);
+  run(last === 'X' ? JAM : last ? pub(last) : START, false);
+};
+const s = document.createElement('script');
+s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(window.GOOGLE_MAPS_KEY || '')}&v=weekly&loading=async&callback=init`;
+s.onerror = () => { document.querySelector('main').textContent = 'Google Maps failed to load.'; };
+document.head.append(s);
+</script>
+</body>
+</html>
