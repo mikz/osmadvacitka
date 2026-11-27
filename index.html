@@ -336,7 +336,9 @@ async function liveDelays(root) {
   for (const el of root.querySelectorAll('.cd[data-line]')) {
     try {
       const sched = +el.dataset.sched, line = el.dataset.line, brd = await board(el.dataset.stop);
-      const d = brd.find(x => x.route.short_name === line && Math.abs(new Date(x.departure_timestamp.scheduled) - sched) <= 90000);
+      // same line, scheduled or predicted time closest to Google's, within 4 minutes
+      const off = x => Math.min(...['scheduled', 'predicted'].map(k => Math.abs(new Date(x.departure_timestamp[k] || 0) - sched)));
+      const d = brd.filter(x => x.route.short_name === line && off(x) <= 240000).sort((x, y) => off(x) - off(y))[0];
       if (!d) continue;
       // how often this line leaves from the same platform
       const at = x => new Date(x.departure_timestamp.predicted || x.departure_timestamp.scheduled).getTime();
