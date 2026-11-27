@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Osmadvacítka">
 <meta name="theme-color" content="#202124">
 <meta name="color-scheme" content="light dark">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,block,directions_bus,directions_walk,funicular,location_on,lock,lock_open,subway,train,tram&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,block,departure_board,directions_bus,directions_walk,flag,funicular,location_on,lock,lock_open,map,refresh,schedule,sensors,subway,timer,train,tram&display=block">
 <title>Osmadvacítka – route</title>
 <style>
   * { box-sizing: border-box; }
@@ -58,6 +58,7 @@
   .lk { position: absolute; right: 0; top: 102px; display: flex; gap: 8px; } .lk button { width: 40px; height: 36px; padding: 0; }
   button .mi { color: inherit; pointer-events: none; }
   button[aria-pressed=true] { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .cd .mi, .mode .mi, a .mi { color: inherit; } .opt a { text-decoration: none; padding: 4px; }
   .zb { padding: 2px 6px; margin-right: 6px; border-radius: 8px; vertical-align: middle; } .zb .mi { pointer-events: none; font-size: 22px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
@@ -391,17 +392,17 @@ async function legBody(a, b, t) {
   const [walks, rides] = await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(a, b, m, t)));
   const walk = walks[0], best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
   const gm = `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=`;
-  let html = best ? `<small>leaving ${hhmm(t)} · fastest gets there ${hhmm(t + best.secs * 1000)}</small>` : '<small>No route found.</small>';
+  let html = best ? `<small>${mi('schedule', 'Leaving')} ${hhmm(t)} → ${mi('flag', 'fastest arrival')} ${hhmm(t + best.secs * 1000)}</small>` : '<small>—</small>';
   if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">${WALK} ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
-    <a target="_blank" rel="noopener" href="${gm}walking">map</a></div>`;
+    <a target="_blank" rel="noopener" href="${gm}walking">${mi('map', 'Open in Google Maps')}</a></div>`;
   rides.slice(0, 3).forEach(r => {
     const i = r.leg.steps.findIndex(x => x.travel_mode === 'TRANSIT');   // first vehicle: when it leaves, how far the stop is
     const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
-    html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">${r.leg.steps.filter(x => x.travel_mode === 'TRANSIT').map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · arrives ${hhmm(t + r.secs * 1000)}</span>
-    <a target="_blank" rel="noopener" href="${gm}transit">map</a>
-    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">IDOS</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}" data-v="${ICON[r.leg.steps[i].transit.line.vehicle.type] || 'directions_bus'}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
+    html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">${r.leg.steps.filter(x => x.travel_mode === 'TRANSIT').map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${mi('flag', 'arrives')} ${hhmm(t + r.secs * 1000)}</span>
+    <a target="_blank" rel="noopener" href="${gm}transit">${mi('map', 'Open in Google Maps')}</a>
+    <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">${mi('departure_board', 'Timetable on IDOS')}</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}" data-v="${ICON[r.leg.steps[i].transit.line.vehicle.type] || 'directions_bus'}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
   });
-  if (!rides.length) html += '<div class="opt"><small>No public transport connection found.</small></div>';
+  if (!rides.length) html += `<div class="opt">${mi('tram', 'No public transport connection')} —</div>`;
   return { html, best };
 }
 async function run(origin) {
@@ -427,8 +428,8 @@ async function run(origin) {
         : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`));
       if (best) { t += best.secs * 1000; travel += best.secs; }
       html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${zoomBtn(s.id)}${label}. ${esc(s.n)}</span></h3>
-        <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
-        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh>Next connections</button></div></div>`;
+        <small>${esc(s.a)} · ${esc(s.b)} <span aria-label="from">←</span> ${esc(prev.n)}</small><div class="body">${body}</div>
+        <div class="row">${s.id === 'P' ? '' : `<label><input type="checkbox" data-done="${s.id}"> Done</label>`}<button data-refresh aria-label="Next connections now">${mi('refresh', '')}</button></div></div>`;
       if (s.id !== 'P') t += pubMin;
       prev = s;
     }
@@ -445,7 +446,7 @@ async function run(origin) {
 }
 async function refresh(leg) {   // look the leg up again, leaving right now
   const body = leg.querySelector('.body');
-  body.innerHTML = '<small>Looking up…</small>';
+  body.innerHTML = '<small>…</small>';
   body.innerHTML = (await legBody(stopById(leg.dataset.a), stopById(leg.dataset.b), Date.now())).html;
   tick();
 }
@@ -489,9 +490,9 @@ function tick() {   // countdowns; when every shown connection of the current le
     const left = (el.dataset.dep - now) / 60000, walk = el.dataset.walk / 60, spare = left - walk;
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
-    const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · live: ${d >= 60 ? '+' + Math.round(d / 60) + ' min late' : 'on time'}`;
-    el.innerHTML = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${WALK} ${Math.ceil(walk)} min · `
-      + (state === 'late' ? 'too late' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min spare`)) + live;
+    const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · ${mi('sensors', 'live')} ${d >= 60 ? '+' + Math.round(d / 60) : '0'}`;
+    el.innerHTML = (state === 'gone' ? `${mi('timer', 'Departed')} —` : `${mi('timer', 'Leaves in')} ${Math.floor(left)} min · ${WALK} ${Math.ceil(walk)} · `
+      + (state === 'late' ? '✗' : state === 'tight' ? 'run!' : `+${Math.floor(spare)}`)) + live;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
