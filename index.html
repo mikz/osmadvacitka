@@ -60,6 +60,7 @@
   button .mi { color: inherit; pointer-events: none; }
   button[aria-pressed=true] { background: #1a73e8; color: #fff; border-color: #1a73e8; }
   .cd .mi, .mode .mi, a .mi { color: inherit; } .opt a { text-decoration: none; padding: 4px; }
+  .pace { display: flex; align-items: center; gap: 10px; padding: 10px 0; font-size: 14px; } .pace input { flex: 1; } .pace output { font-weight: 600; min-width: 8.5em; }
   .zb { padding: 2px 6px; margin-right: 6px; border-radius: 8px; vertical-align: middle; } .zb .mi { pointer-events: none; font-size: 22px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
@@ -87,6 +88,7 @@
   <div id="msg" role="alert"></div>
   <section id="planv" hidden>
     <div id="summaryP" class="sum" aria-live="polite"></div>
+    <label class="pace">On foot: <output id="paceOut"></output> <input id="pace" type="range" min="1" max="2" step="0.1"></label>
     <div id="hops"></div>
     <details><summary>All times between stops (min)</summary><div id="table"></div>
       <small>Precomputed for Friday 18:00. The circular arrow is how often the least frequent line of the connection runs (PID timetable); planning adds half of it as waiting. Locking in fetches live routes. Rows = from, columns = to. Blue = walking is faster, red = public transport. S start, X Jamajka, P Petřín.</small></details>
@@ -276,8 +278,13 @@ async function matrix(mode, from, to) {
   return Object.fromEntries(r.rows.map((row, i) => [from[i].id, Object.fromEntries(row.elements.map((e, j) =>
     [to[j].id, e.status === 'OK' ? { s: e.duration.value, m: e.distance.value } : { s: Infinity, m: 0 }]))]));
 }
+let pace = load('pace', 1.4);   // walking speed factor: 1 = Google's walk, 1.4 = light jog
+const paceName = () => `${pace <= 1.05 ? 'walk' : pace < 1.35 ? 'brisk' : pace < 1.75 ? 'light jog' : 'run'} ×${pace.toFixed(1)}`;
+$('pace').value = pace; $('paceOut').textContent = paceName();
+$('pace').oninput = () => { pace = +$('pace').value; store('pace', pace); $('paceOut').textContent = paceName(); if (plan) renderPlan(); };
+const foot = (a, b) => ({ s: plan.w[a][b].s / pace, m: plan.w[a][b].m });
 const tcost = (a, b) => plan.t[a][b].s + (plan.t[a][b].f ?? 600) / 2;   // ride + half the interval as expected wait
-const hop = (a, b) => Math.min(plan.w[a][b].s, tcost(a, b));
+const hop = (a, b) => Math.min(foot(a, b).s, tcost(a, b));
 async function startPlan(origin, ids, keepOrder) {
   const my = ++runId;
   view('planv');
@@ -320,7 +327,7 @@ function renderPlan() {
   const seq = [plan.origin, ...plan.ids.map(pub), ...plan.tail], n = plan.ids.length;
   let total = 0, html = '';
   for (let i = 1; i < seq.length; i++) {
-    const a = seq[i - 1], b = seq[i], w = plan.w[a.id][b.id], tr = plan.t[a.id][b.id], t = tcost(a.id, b.id), walk = w.s <= t;
+    const a = seq[i - 1], b = seq[i], w = foot(a.id, b.id), tr = plan.t[a.id][b.id], t = tcost(a.id, b.id), walk = w.s <= t;
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
@@ -335,10 +342,10 @@ function renderPlan() {
   $('summaryP').textContent = `${mins(total)} travel · finish ${hhmm(Date.now() + (total + pubMin) * 1000)}`;
   $('table').innerHTML = `<table><tr><th></th>${plan.to.map(b => `<th>${b.id}</th>`).join('')}</tr>${plan.from.map(a =>
     `<tr><th>${a.id === 'me' ? '•' : a.id}</th>${plan.to.map(b => a.id === b.id ? '<td></td>'
-      : `<td class="${plan.w[a.id][b.id].s <= tcost(a.id, b.id) ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
+      : `<td class="${foot(a.id, b.id).s <= tcost(a.id, b.id) ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
   const hops = seq.map((p, i) => {
     if (!i) return null;
-    const a = seq[i - 1], w = plan.w[a.id][p.id], tr = plan.t[a.id][p.id];
+    const a = seq[i - 1], w = foot(a.id, p.id), tr = plan.t[a.id][p.id];
     return { a, byFoot: w.s <= tcost(a.id, p.id), walk: `${WALK} ${mins(w.s)}`, dist: km(w.m),
       ride: tr.l ? `${mi(ICON[tr.v] || 'tram', 'Public transport')} ${esc(tr.l)} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)}` : ''}` : '' };
   });
@@ -396,18 +403,20 @@ const icon = s => mi(ICON[s.transit.line.vehicle.type] || 'directions_bus', s.tr
 const WALK = mi('directions_walk', 'Walk');
 const stepText = s => s.travel_mode === 'TRANSIT'   // line and direction, then from → to with the stop count on the arrow
   ? `${icon(s)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> → ${esc(s.transit.headsign || '')}${s.transit.headway ? ` · ${mi('autorenew', 'every')} ${Math.round(s.transit.headway / 60)}` : ''}
-     <div class="ride"><b>${hhmm(s.transit.departure_time.value)}</b> ${esc(s.transit.departure_stop.name)} <span class="hopn" aria-label="${s.transit.num_stops} stops">${s.transit.num_stops}</span> ${hhmm(s.transit.arrival_time.value)} ${esc(s.transit.arrival_stop.name)}</div>`
-  : `${WALK} ${mins(s.duration.value)}`;
+     <div class="ride"><b class="dt">${hhmm(s.transit.departure_time.value)}</b> ${esc(s.transit.departure_stop.name)} <span class="hopn" aria-label="${s.transit.num_stops} stops">${s.transit.num_stops}</span> ${hhmm(s.transit.arrival_time.value)} ${esc(s.transit.arrival_stop.name)}</div>`
+  : `${WALK} ${mins(s.duration.value / pace)}`;
 async function legBody(a, b, t) {
   const [walks, rides] = await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(a, b, m, t)));
-  const walk = walks[0], best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
+  const walk = walks[0];
+  if (walk) walk.secs /= pace;
+  const best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
   const gm = `https://www.google.com/maps/dir/?api=1&origin=${a.lat},${a.lng}&destination=${b.lat},${b.lng}&travelmode=`;
   let html = best ? `<small>${mi('schedule', 'Leaving')} ${hhmm(t)} → ${mi('flag', 'fastest arrival')} ${hhmm(t + best.secs * 1000)}</small>` : '<small>—</small>';
   if (walk) html += `<div class="opt${best === walk ? ' best' : ''}"><span class="mode walk">${WALK} ${mins(walk.secs)} · ${esc(walk.leg.distance.text)}</span>
     <a target="_blank" rel="noopener" href="${gm}walking">${mi('map', 'Open in Google Maps')}</a></div>`;
   rides.slice(0, 3).forEach(r => {
     const i = r.leg.steps.findIndex(x => x.travel_mode === 'TRANSIT');   // first vehicle: when it leaves, how far the stop is
-    const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0);
+    const dep = r.leg.steps[i].transit.departure_time.value.getTime(), walk = r.leg.steps.slice(0, i).reduce((a, x) => a + x.duration.value, 0) / pace;
     html += `<div class="opt${best === r ? ' best' : ''}"><span class="mode transit">${r.leg.steps.filter(x => x.travel_mode === 'TRANSIT').map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${mi('flag', 'arrives')} ${hhmm(t + r.secs * 1000)}</span>
     <a target="_blank" rel="noopener" href="${gm}transit">${mi('map', 'Open in Google Maps')}</a>
     <a target="_blank" rel="noopener" href="https://idos.cz/pid/spojeni/vysledky/?f=${encodeURIComponent(r.leg.steps[i].transit.departure_stop.name)}&t=${encodeURIComponent(r.leg.steps.findLast(x => x.travel_mode === 'TRANSIT').transit.arrival_stop.name)}">${mi('departure_board', 'Timetable on IDOS')}</a><div class="cd" data-dep="${dep}" data-sched="${dep}" data-walk="${walk}" data-stop="${esc(r.leg.steps[i].transit.departure_stop.name)}" data-line="${esc(r.leg.steps[i].transit.line.short_name || '')}" data-v="${ICON[r.leg.steps[i].transit.line.vehicle.type] || 'directions_bus'}"></div><small class="nx"></small><ul>${r.leg.steps.map(x => `<li>${stepText(x)}</li>`).join('')}</ul></div>`;
@@ -490,6 +499,8 @@ async function liveDelays(root) {
       if (!d.delay.is_available) continue;
       el.dataset.delay = d.delay.seconds || 0;
       el.dataset.dep = at(d);
+      const dt = el.parentElement.querySelector('.dt');   // the step shows the live time too
+      if (dt) dt.textContent = hhmm(at(d));
     } catch {}
   }
 }
