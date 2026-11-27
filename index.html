@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-title" content="Osmadvacítka">
 <meta name="theme-color" content="#202124">
 <meta name="color-scheme" content="light dark">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,directions_bus,directions_walk,funicular,location_on,subway,train,tram&display=block">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,1,0&icon_names=autorenew,block,directions_bus,directions_walk,funicular,location_on,lock,lock_open,subway,train,tram&display=block">
 <title>Osmadvacítka – route</title>
 <style>
   * { box-sizing: border-box; }
@@ -54,6 +54,10 @@
   .ride { padding-left: 26px; }
   .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
   .hopn::after { content: ''; position: absolute; right: -2px; bottom: -5px; border: 4px solid transparent; border-left-color: currentColor; border-right-width: 0; }
+  #hops .leg[data-id] { min-height: 150px; }
+  .lk { position: absolute; right: 0; top: 102px; display: flex; gap: 8px; } .lk button { width: 40px; height: 36px; padding: 0; }
+  button .mi { color: inherit; pointer-events: none; }
+  button[aria-pressed=true] { background: #1a73e8; color: #fff; border-color: #1a73e8; }
   .zb { padding: 2px 6px; margin-right: 6px; border-radius: 8px; vertical-align: middle; } .zb .mi { pointer-events: none; font-size: 22px; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
@@ -277,25 +281,31 @@ async function startPlan(origin, ids, keepOrder) {
       catch { return startPlan(lastStop(), ids).then(() => { $('msg').textContent = 'Live lookup from your position failed; planning from the last finished stop instead.'; }); }
     }
     if (my !== runId) return;
-    plan = { origin, ids, tail, from, to, w, t };
+    plan = { origin, ids, tail, from, to, w, t, locked: new Set(keepOrder?.locked), notFirst: new Set(keepOrder?.notFirst) };
     if (!keepOrder) plan.ids = optimize();
     renderPlan();
   } catch (e) { $('summaryP').textContent = ''; $('msg').textContent = 'Loading times failed: ' + (e.message || e); }
 }
-function optimize() {   // brute force, 8! = 40,320 orders
-  const ids = plan.ids, n = ids.length, end = plan.tail[0].id;
+function optimize() {   // brute force, 8! = 40,320 orders; locked pubs keep their position, banned pubs are never first
+  const ids = plan.ids, n = ids.length, end = plan.tail[0].id, L = plan.locked, B = plan.notFirst;
+  const banFirst = ids.some(id => !L.has(id) && !B.has(id));   // ignore the ban if it would leave nobody to go first
   let best = Infinity, bestPath = ids;
   const path = [], used = Array(n).fill(false);
   (function go(at, cost) {
     if (cost >= best) return;
-    if (path.length === n) { cost += hop(at, end); if (cost < best) { best = cost; bestPath = [...path]; } return; }
-    for (let k = 0; k < n; k++) if (!used[k]) { used[k] = true; path.push(ids[k]); go(ids[k], cost + hop(at, ids[k])); path.pop(); used[k] = false; }
+    const pos = path.length;
+    if (pos === n) { cost += hop(at, end); if (cost < best) { best = cost; bestPath = [...path]; } return; }
+    for (let k = 0; k < n; k++) {
+      if (used[k]) continue;
+      if (L.has(ids[pos]) ? k !== pos : L.has(ids[k]) || (pos === 0 && banFirst && B.has(ids[k]))) continue;
+      used[k] = true; path.push(ids[k]); go(ids[k], cost + hop(at, ids[k])); path.pop(); used[k] = false;
+    }
   })(plan.origin.id, 0);
   return bestPath;
 }
 const km = m => m < 1000 ? m + ' m' : (m / 1000).toFixed(1) + ' km';
 function renderPlan() {
-  store('plan', { origin: plan.origin, ids: plan.ids });   // an order being arranged survives a reload
+  store('plan', { origin: plan.origin, ids: plan.ids, locked: [...plan.locked], notFirst: [...plan.notFirst] });   // an order being arranged survives a reload
   const seq = [plan.origin, ...plan.ids.map(pub), ...plan.tail], n = plan.ids.length;
   let total = 0, html = '';
   for (let i = 1; i < seq.length; i++) {
@@ -303,7 +313,9 @@ function renderPlan() {
     total += Math.min(w.s, t);
     const mv = i <= n ? `<button data-mv="${i - 1},-1" aria-label="Move ${esc(b.n)} earlier" ${i === 1 ? 'disabled' : ''}>↑</button>
       <button data-mv="${i - 1},1" aria-label="Move ${esc(b.n)} later" ${i === n ? 'disabled' : ''}>↓</button>` : '';
-    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${zoomBtn(b.id)}${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) <span aria-label="from">←</span> ${esc(a.n)}</small></span>${mv}</h3>${i <= n ? '<i class="grip" aria-hidden="true">≡</i>' : ''}
+    html += `<div class="leg"${i <= n ? ` data-id="${b.id}"` : ''}><h3><span>${zoomBtn(b.id)}${i}. ${esc(b.n)} <small style="display:inline;font-weight:400">(${b.id}) <span aria-label="from">←</span> ${esc(a.n)}</small></span>${mv}</h3>${i <= n ? `<i class="grip" aria-hidden="true">≡</i><span class="lk">
+      <button data-lock="${b.id}" aria-pressed="${plan.locked.has(b.id)}" aria-label="Keep at this position" title="Keep at this position">${mi(plan.locked.has(b.id) ? 'lock' : 'lock_open', '')}</button>
+      <button data-ban="${b.id}" aria-pressed="${plan.notFirst.has(b.id)}" aria-label="Never first" title="Never first">${mi('block', '')}</button></span>` : ''}
       <div><span class="${walk ? 'mode walk' : ''}">${WALK} ${mins(w.s)} · ${km(w.m)}</span></div>
       <div><span class="${walk ? '' : 'mode transit'}">${mi(ICON[tr.v] || 'tram', 'Public transport')} ${tr.l || tr.s < w.s - 60 ? `${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)} min` : ''}` : '—'}</span></div></div>`;
   }
@@ -335,6 +347,12 @@ new Sortable($('hops'), {   // drag the ≡ handle; Jamajka and Petřín stay fi
 $('hops').onclick = e => {
   const z = e.target.closest('[data-zoom]');
   if (z) return zoomTo(stopById(z.dataset.zoom));
+  const c = e.target.closest('[data-lock],[data-ban]');
+  if (c) {   // constraints for Suggest best
+    const set = c.dataset.lock ? plan.locked : plan.notFirst, id = +(c.dataset.lock || c.dataset.ban);
+    set.has(id) ? set.delete(id) : set.add(id);
+    return renderPlan();
+  }
   if (!e.target.dataset.mv) return;
   const [i, d] = e.target.dataset.mv.split(',').map(Number), ids = plan.ids;
   [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
@@ -505,7 +523,7 @@ window.init = () => {
   if (!ids.length) ids = load('order', []).filter(pub);
   const saved = load('plan');
   if (new Set(ids).size === 8) { order = ids; done = done.filter(id => id === 'X' || ids.includes(id)); } else done = [];
-  if (saved && saved.ids?.every(pub)) return startPlan(saved.origin, saved.ids, true);   // was arranging an order
+  if (saved && saved.ids?.every(pub)) return startPlan(saved.origin, saved.ids, saved);   // was arranging an order
   if (!order.length) return;
   view('route');
   run(lastStop());
