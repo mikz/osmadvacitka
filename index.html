@@ -49,6 +49,7 @@
   .lbl { position: absolute; white-space: nowrap; font: 600 12px/1.3 system-ui, sans-serif; background: #fffe; color: #000; padding: 1px 6px; border-radius: 8px; box-shadow: 0 1px 3px #0005; pointer-events: none; }
   .lbl.name { transform: translate(-50%, 4px); } .lbl.hop { transform: translate(-50%, -50%); font-weight: 500; background: #ffe9a8; }
   #map.far .lbl.name { display: none; }
+  .iw { color: #000; font: 14px/1.5 system-ui, sans-serif; } .iw .mi { color: #000; }
   .lbl .mi { color: #000; font-size: 15px; }
   .ride { padding-left: 26px; }
   .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
@@ -211,7 +212,7 @@ let Lbl, lastBounds, info;
 function label(p, html, cls) {   // HTML label anchored to a map position
   Lbl ??= class extends google.maps.OverlayView {
     constructor(p, html, cls) { super(); this.p = p; this.el = Object.assign(document.createElement('div'), { className: 'lbl ' + cls, innerHTML: html }); }
-    onAdd() { this.getPanes().floatPane.append(this.el); }
+    onAdd() { this.getPanes().markerLayer.append(this.el); }   // markerLayer: below the pin popup
     draw() { const q = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.p)); this.el.style.left = q.x + 'px'; this.el.style.top = q.y + 'px'; }
     onRemove() { this.el.remove(); }
   };
@@ -221,17 +222,19 @@ function fullscreen(on) {   // CSS full screen: the browser Fullscreen API is mi
   on = $('map').classList.toggle('full', on);
   map.setOptions({ gestureHandling: on ? 'greedy' : 'cooperative' });   // one finger pans in full screen; embedded keeps page scrolling
   fsBtn.textContent = on ? '✕ Exit full screen' : '⛶ Full screen';
-  setTimeout(() => { google.maps.event.trigger(map, 'resize'); lastBounds && map.fitBounds(lastBounds, 40); }, 150);
+  setTimeout(() => google.maps.event.trigger(map, 'resize'), 100);
+  setTimeout(() => lastBounds && map.fitBounds(lastBounds, 40), 500);   // fit once the new size has settled
 }
 let fsBtn;
-function draw(points, labels, lines) {   // pins + lines on the shared map
+function draw(points, labels, lines, infos = []) {   // pins + lines on the shared map
   overlays.forEach(o => o.setMap(null)); overlays = [];
   const bounds = new google.maps.LatLngBounds();
   points.forEach((p, i) => {
     const m = new google.maps.Marker({ map, position: ll(p), label: labels[i], title: p.n });
-    m.addListener('click', () => {   // tap a pin: which pub, where, what beer
-      info.setContent(`<div style="color:#000;font:14px system-ui"><b>${esc(p.n)}</b>${typeof p.id === 'number' ? ` (${p.id})` : ''}${p.a ? `<br>${esc(p.a)} · ${esc(p.b)}` : ''}
-        <br><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}">Open in Google Maps</a></div>`);
+    m.addListener('click', () => {   // tap a pin: which pub, what beer, how to get there
+      const el = html => Object.assign(document.createElement('div'), { className: 'iw', innerHTML: html });
+      info.setOptions({ headerContent: el(`<b>${esc(p.n)}</b>${typeof p.id === 'number' ? ` (${p.id})` : ''}`) });
+      info.setContent(el([p.a && `${esc(p.a)} · ${esc(p.b)}`, infos[i]].filter(Boolean).join('<br>')));
       info.open({ map, anchor: m });
     });
     overlays.push(m); bounds.extend(ll(p));
@@ -304,13 +307,18 @@ function renderPlan() {
   $('table').innerHTML = `<table><tr><th></th>${plan.to.map(b => `<th>${b.id}</th>`).join('')}</tr>${plan.from.map(a =>
     `<tr><th>${a.id === 'me' ? '•' : a.id}</th>${plan.to.map(b => a.id === b.id ? '<td></td>'
       : `<td class="${plan.w[a.id][b.id].s <= tcost(a.id, b.id) ? 'w' : 't'}">${Math.round(hop(a.id, b.id) / 60)}</td>`).join('')}</tr>`).join('')}</table>`;
-  draw(seq, seq.map((p, i) => i ? String(i) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }]);   // pin number = position in the list
+  const hops = seq.map((p, i) => {
+    if (!i) return null;
+    const a = seq[i - 1], w = plan.w[a.id][p.id], tr = plan.t[a.id][p.id];
+    return { a, byFoot: w.s <= tcost(a.id, p.id), walk: `${WALK} ${mins(w.s)}`, dist: km(w.m),
+      ride: tr.l ? `${mi(ICON[tr.v] || 'tram', 'Public transport')} ${esc(tr.l)} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)}` : ''}` : '' };
+  });
+  draw(seq, seq.map((p, i) => i ? String(i) : (p.id === 'S' ? 'S' : '•')), [{ path: seq.map(ll), strokeColor: '#666', strokeWeight: 3 }],   // pin number = position in the list
+    hops.map(h => h && `← ${esc(h.a.n)}<br>${h.walk} · ${h.dist}${h.ride ? '<br>' + h.ride : ''}`));
   seq.forEach((p, i) => {   // pub names under the pins, hop info on the lines
     if (!i) return;
     label(p, `${esc(p.n)} (${p.id})`, 'name');
-    const a = seq[i - 1], w = plan.w[a.id][p.id], tr = plan.t[a.id][p.id];
-    label({ lat: (a.lat + p.lat) / 2, lng: (a.lng + p.lng) / 2 }, w.s <= tcost(a.id, p.id) ? `${WALK} ${mins(w.s)}`
-      : `${mi(ICON[tr.v] || 'tram', 'Public transport')} ${esc(tr.l || '')} · ${mins(tr.s)}${tr.f ? ` · ${mi('autorenew', 'every')} ${Math.round(tr.f / 60)}` : ''}`, 'hop');
+    label({ lat: (hops[i].a.lat + p.lat) / 2, lng: (hops[i].a.lng + p.lng) / 2 }, hops[i].byFoot ? hops[i].walk : hops[i].ride, 'hop');
   });
 }
 new Sortable($('hops'), {   // drag the ≡ handle; Jamajka and Petřín stay fixed at the end
@@ -379,7 +387,7 @@ async function run(origin) {
     history.replaceState(null, '', '#' + order.join(',')); store('order', order);   // installed app starts without the hash
     const stops = [...todo.map(pub), ...(done.includes('X') ? [] : [JAM]), PET];
     const pubMin = (+$('pubMin').value || 0) * 60000;  // ms
-    const labels = [origin.id === 'S' ? 'S' : '•'], lines = [];
+    const labels = [origin.id === 'S' ? 'S' : '•'], lines = [], infos = [''];
     let t = Date.now(), prev = origin, travel = 0, html = '';
     for (const [i, s] of stops.entries()) {
       const { html: body, best } = await legBody(prev, s, t);
@@ -387,6 +395,10 @@ async function run(origin) {
       const label = s.id === 'P' ? '🏁' : String(visited.length + i + 1);
       labels.push(label);
       lines.push(best && { path: best.path, strokeColor: best.transit ? '#d93025' : '#1a73e8' });
+      const ride = best?.transit && best.leg.steps.filter(x => x.travel_mode === 'TRANSIT');
+      infos.push(`← ${esc(prev.n)}<br>` + (!best ? 'no route' : ride
+        ? `${ride.map(x => `${icon(x)} ${esc(x.transit.line.short_name || '')}`).join(' + ')} · ${hhmm(ride[0].transit.departure_time.value)} ${esc(ride[0].transit.departure_stop.name)} · arrives ${hhmm(t + best.secs * 1000)}`
+        : `${WALK} ${mins(best.secs)} · ${esc(best.leg.distance.text)}`));
       if (best) { t += best.secs * 1000; travel += best.secs; }
       html += `<div class="leg" data-a="${prev.id}" data-b="${s.id}"><h3><span>${label}. ${esc(s.n)}</span></h3>
         <small>${esc(s.a)} · ${esc(s.b)} · from ${esc(prev.n)}</small><div class="body">${body}</div>
@@ -397,7 +409,7 @@ async function run(origin) {
     $('legs').innerHTML = html;
     tick();
     $('summary').textContent = `${mins(travel)} travel · finish ${hhmm(t)}`;
-    const ov = draw([origin, ...stops], labels, lines);
+    const ov = draw([origin, ...stops], labels, lines, infos);
     legOv = Object.fromEntries(stops.map((x, i) => [x.id, [ov.pins[i + 1], ov.lines[i]]]));
     stops.forEach(x => label(x, esc(x.n), 'name'));
   } catch (e) {
