@@ -43,12 +43,15 @@
   .mode { font-weight: 600; }
   .mode.walk { color: #1a73e8; } .mode.transit { color: #d93025; }
   .mi { font-family: 'Material Symbols Outlined'; font-size: 1.25em; line-height: 1; vertical-align: -0.2em; font-weight: normal; font-style: normal; display: inline-block; white-space: nowrap; direction: ltr; -webkit-font-feature-settings: 'liga'; font-feature-settings: 'liga'; color: CanvasText; }
-  #map.full { position: fixed; inset: 0; height: auto; margin: 0; z-index: 10; }
+  #map.full { position: fixed !important; inset: 0; height: auto !important; margin: 0; z-index: 10; }   /* Maps sets inline position */
   .fsbtn { margin: 10px; padding: 8px 12px; font-size: 14px; background: #fff; color: #000; box-shadow: 0 1px 4px #0006; }
   #map.full .fsbtn { margin-top: calc(10px + env(safe-area-inset-top)); }
   .lbl { position: absolute; white-space: nowrap; font: 600 12px/1.3 system-ui, sans-serif; background: #fffe; color: #000; padding: 1px 6px; border-radius: 8px; box-shadow: 0 1px 3px #0005; pointer-events: none; }
   .lbl.name { transform: translate(-50%, 4px); } .lbl.hop { transform: translate(-50%, -50%); font-weight: 500; background: #ffe9a8; }
   .lbl .mi { color: #000; font-size: 15px; }
+  .ride { padding-left: 26px; }
+  .hopn { display: inline-block; min-width: 2.6em; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.2; border-bottom: 2px solid currentColor; position: relative; top: -4px; margin: 0 4px 0 2px; }
+  .hopn::after { content: ''; position: absolute; right: -2px; bottom: -5px; border: 4px solid transparent; border-left-color: currentColor; border-right-width: 0; }
   .opt { margin-top: 8px; padding-left: 8px; border-left: 3px solid #8884; }
   .opt.best { border-left-color: currentColor; }
   .cd { font-weight: 600; font-size: 14px; } .cd.ok { color: #188038; } .cd.tight { color: #e37400; } .cd.late, .cd.gone { opacity: .6; text-decoration: line-through; }
@@ -326,9 +329,10 @@ const ICON = { TRAM: 'tram', SUBWAY: 'subway', METRO_RAIL: 'subway', BUS: 'direc
 const mi = (name, label) => `<span class="mi" role="img" aria-label="${esc(label)}">${name}</span>`;   // monochrome icon font
 const icon = s => mi(ICON[s.transit.line.vehicle.type] || 'directions_bus', s.transit.line.vehicle.name);
 const WALK = mi('directions_walk', 'Walk');
-const stepText = s => s.travel_mode === 'TRANSIT'
-  ? `${icon(s)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> → ${esc(s.transit.headsign || '')}: <b>${hhmm(s.transit.departure_time.value)}</b> ${esc(s.transit.departure_stop.name)} → ${hhmm(s.transit.arrival_time.value)} ${esc(s.transit.arrival_stop.name)} (${s.transit.num_stops} stops${s.transit.headway ? `, every ${Math.round(s.transit.headway / 60)} min` : ''})`
-  : `${WALK} ${mins(s.duration.value)} · ${esc(s.distance.text)}`;
+const stepText = s => s.travel_mode === 'TRANSIT'   // line and direction, then from → to with the stop count on the arrow
+  ? `${icon(s)} <b>${esc(s.transit.line.short_name || s.transit.line.name)}</b> → ${esc(s.transit.headsign || '')}${s.transit.headway ? ` · ${mi('autorenew', 'every')} ${Math.round(s.transit.headway / 60)}` : ''}
+     <div class="ride"><b>${hhmm(s.transit.departure_time.value)}</b> ${esc(s.transit.departure_stop.name)} <span class="hopn" aria-label="${s.transit.num_stops} stops">${s.transit.num_stops}</span> ${hhmm(s.transit.arrival_time.value)} ${esc(s.transit.arrival_stop.name)}</div>`
+  : `${WALK} ${mins(s.duration.value)}`;
 async function legBody(a, b, t) {
   const [walks, rides] = await Promise.all(['WALKING', 'TRANSIT'].map(m => directions(a, b, m, t)));
   const walk = walks[0], best = [walk, rides[0]].filter(Boolean).sort((x, y) => x.secs - y.secs)[0];
@@ -428,7 +432,7 @@ function tick() {   // countdowns; when every shown connection of the current le
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
     const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · live: ${d >= 60 ? '+' + Math.round(d / 60) + ' min late' : 'on time'}`;
-    el.innerHTML = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${WALK} ${Math.ceil(walk)} min to stop · `
+    el.innerHTML = (state === 'gone' ? 'Departed' : `Leaves in ${Math.floor(left)} min · ${WALK} ${Math.ceil(walk)} min · `
       + (state === 'late' ? 'too late' : state === 'tight' ? 'run!' : `${Math.floor(spare)} min spare`)) + live;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
