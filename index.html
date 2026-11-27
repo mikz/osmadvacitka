@@ -491,14 +491,16 @@ function tick() {   // countdowns; when every shown connection of the current le
     const state = left < 0 ? 'gone' : spare < 0 ? 'late' : spare < 2 ? 'tight' : 'ok';
     el.className = 'cd ' + state;
     const d = el.dataset.delay, live = d === undefined ? '' : d === 'x' ? ' · CANCELLED' : ` · ${mi('sensors', 'live')} ${d >= 60 ? '+' + Math.round(d / 60) : '0'}`;
-    el.innerHTML = (state === 'gone' ? `${mi('timer', 'Departed')} —` : `${mi('timer', 'Leaves in')} ${Math.floor(left)} min · ${WALK} ${Math.ceil(walk)} · `
-      + (state === 'late' ? '✗' : state === 'tight' ? 'run!' : `+${Math.floor(spare)}`)) + live;
+    const mmss = x => `${Math.floor(x)}:${String(Math.floor(x * 60 % 60)).padStart(2, '0')}`;
+    // walk icon: start walking in m:ss; vehicle icon: it leaves in m:ss
+    el.innerHTML = (state === 'gone' ? `${mi(el.dataset.v, 'Departed')} —`
+      : `${mi('directions_walk', 'Start walking in')} ${state === 'late' ? '✗' : state === 'tight' ? 'run! ' + mmss(spare) : mmss(spare)} → ${mi(el.dataset.v, 'Leaves in')} ${mmss(left)}`) + live;
   });
   if (cur0() && now - lastLive > 30000) { lastLive = now; liveDelays(cur0()); }
   const cur = document.querySelector('#legs .leg:not(.done)'), cds = cur ? [...cur.querySelectorAll('.cd')] : [];
   if (!$('route').hidden && !document.hidden && cds.length && cds.every(c => /gone|late/.test(c.className)) && now - lastAuto > 60000) { lastAuto = now; refresh(cur); }
 }
-setInterval(tick, 10000);
+setInterval(tick, 1000);   // tick tick tick
 document.addEventListener('visibilitychange', tick);
 $('legs').onclick = e => {
   const leg = e.target.closest('.leg');
